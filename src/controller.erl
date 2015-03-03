@@ -4,14 +4,15 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 -export([start/0]).
 
+-record(aurora_users, {name, location}).
+
 start() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 % This is called when a connection is made to the server
 init([]) ->
-    Users = dict:new(), % It maps nick to socket
-    {ok, Users}.
-    % Users_test = 
+    State = [],
+    {ok, State}.
 
 % handle_call is invoked in response to gen_server:call
 
@@ -19,70 +20,72 @@ init([]) ->
 % Handles calls with 'connect' atom
 % if we can find an existing user, we assume that he's the correct person
 % authentication should be handled at the interface
-handle_call({connect, Nick, Socket}, _From, Users) ->
-    Response = case dict:is_key(Nick, Users) of
-        true ->
-            NewUsers = Users,
-            {ok, existing_user, format_user_list(Users)};
-        false ->
-            NewUsers = dict:append(Nick, Socket, Users),
-            {ok, new_user, format_user_list(NewUsers)}
-    end,
-    {reply, Response, NewUsers};
+handle_call(Message, _From, State) ->
 
+    case Message of
+        {connect, Name, Socket} ->
+            case add_user(Name, Socket) of
+                ok ->
+                    {reply, ok, State};
+                _ ->
+                    {reply, error, State}
+            end;
 
-% if we can find the user, we erase him from the list of Users
-handle_call({disconnect, Nick}, _From, Users) ->
-    Response = case dict:is_key(Nick, Users) of
-        true ->
-            NewUsers = dict:erase(Nick, Users),
-            ok;
-        false ->
-            NewUsers = Users,
-            user_not_found
-    end,
-    {reply, Response, NewUsers};
+        {disconnect, Name} ->
+            {reply, ok, State};
 
-handle_call(_Message, _From, State) ->
-    {reply, error, State}.
-
-
-% handle_cast is invoked in response to gen_server:cast
-handle_cast({say, Nick, Msg}, Users) ->
-    broadcast(Nick, Nick ++ ": " ++ Msg ++ "\n", Users),
-    {noreply, Users};
-
-handle_cast({private_message, Nick, Receiver, Msg}, Users) ->
-    Temp = dict:find(Receiver, Users),
-    case Temp of
-        {ok, [Socket|_]} ->
-            gen_tcp:send(Socket, "Private message from " ++ Nick ++ "\n" ++ Msg ++ ":\n");
         _ ->
-            ok
+            {reply, error, State}
+
+    end.
+
+handle_cast({find, Socket, NameToFind}, State) ->
+    case find_user(NameToFind) of
+        {Name, Location} ->
+            FlattenLocation = lists:flatten(io_lib:format("~p", [Location])),
+            gen_tcp:send(Socket, "USER_FOUND: " ++ Name ++ " " ++ FlattenLocation ++ "\n");
+        no_such_user ->
+            gen_tcp:send(Socket, "USER_NOT_FOUND: " ++ NameToFind)
     end,
-    {noreply, Users};
-
-handle_cast({join, Nick}, Users) ->
-    % broadcast(Nick, "JOIN:" ++ Nick ++ "\n", Users),
-    broadcast(Nick, Nick ++ " has joined the chat room.\n", Users),
-    {noreply, Users};
-
-handle_cast({left, Nick}, Users) ->
-    broadcast(Nick, Nick ++ " has left the chat room.\n", Users),
-    {noreply, Users};
+    {noreply, State};
 
 handle_cast(_Message, State) ->
     {noreply, State}.
 
+%%%%%%%%%%%%%%%%%%%%
+%%% Mnesia interface
+%%%%%%%%%%%%%%%%%%%%
 
-% auxiliary functions
-broadcast(Nick, Msg, Users) ->
-    Sockets = lists:map(fun({_, [Value|_]}) -> Value end, dict:to_list(dict:erase(Nick, Users))),
-    lists:foreach(fun(Sock) -> gen_tcp:send(Sock, Msg) end, Sockets).
+find_user(Name) ->
+    F = fun() ->
+        case mnesia:read({aurora_users, Name}) of
+            [#aurora_users{location = Location}] ->
+                {Name, Location};
+            [] ->
+                no_such_user
+        end
+    end,
+    mnesia:activity(transaction, F).
 
-format_user_list(Users) ->
-    UserList = dict:fetch_keys(Users),
-    string:join(UserList, ", ").
+add_user(Name, Socket) ->
+    {ok, {IPaddress, Port}} = inet:peername(Socket),
+    F = fun() ->
+        mnesia:write(#aurora_users{name = Name, location = {IPaddress, Port}})
+    end,
+    mnesia:activity(transaction, F).
+
+delete_user(Name) ->
+    F = fun() ->
+        mnesia:delete(aurora_users, Name)
+    end,
+    mnesia:activity(transaction, F).
+
+% create_room(Name, RoomName) ->
+    
+
+% add_user_to_room(Name, RoomId)
+% leave_room(Name, RoomId)
+% delete_room(Name, RoomId) % to verify that he's indeed the admin of the room
 
 % Definitions to avoid gen_server compile warnings
 handle_info(_Message, State) -> {noreply, State}.
