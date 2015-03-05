@@ -3,7 +3,7 @@
 -export([start/1, pre_connected_loop/1]).
 -export([install/1]).
 
--record(aurora_users, {name, location}).
+-record(aurora_users, {name, location, socket}).
 
 start(Port) ->
     mnesia:wait_for_tables([aurora_users], 5000),
@@ -74,6 +74,11 @@ connected_loop(Name, Socket) ->
                 "FIND" ->
                     find(Name, Socket, clean(Content));
 
+                "SAY" ->
+                    {PeerName, [_|Text]} = lists:splitwith(fun(T) -> [T] =/= ":" end, Content),
+                    io:format("~p, and message is ~p~n", [PeerName, Text]),
+                    talk(Name, Socket, PeerName, clean(Text));
+
                 "QUIT" ->
                     quit(Name, Socket);
                 _ ->
@@ -88,6 +93,10 @@ connected_loop(Name, Socket) ->
 find(Name, Socket, NameToFind) ->
     gen_server:cast(controller, {find, Socket, NameToFind}),
     connected_loop(Name, Socket).
+
+talk(OwnName, Socket, PeerName, Message) ->
+    gen_server:cast(controller, {talk, OwnName, Socket, PeerName, Message}),
+    connected_loop(OwnName, Socket).
 
 
 quit(Name, Socket) ->
