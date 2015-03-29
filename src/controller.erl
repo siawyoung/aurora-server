@@ -77,18 +77,19 @@ user_exists(PhoneNumber) ->
 find_user(PhoneNumber) ->
     F = fun() ->
         case mnesia:read({aurora_users, PhoneNumber}) of
-            [#aurora_users{username      = UserName, 
-                           session_token = SessionToken,
-                           rooms         = Rooms,
-                           current_ip    = IPaddress,
-                           active_socket = Socket}] ->
+            % [#aurora_users{username      = UserName, 
+            %                session_token = SessionToken,
+            %                rooms         = Rooms,
+            %                current_ip    = IPaddress,
+            %                active_socket = Socket}] ->
 
-                #{username    => UserName, 
-                session_token => SessionToken, 
-                rooms         => Rooms, 
-                current_ip    => IPaddress, 
-                active_socket => Socket};
-
+            %     #{username    => UserName, 
+            %     session_token => SessionToken, 
+            %     rooms         => Rooms, 
+            %     current_ip    => IPaddress, 
+            %     active_socket => Socket};
+            [H|_T] ->
+                H;
             _ ->
                 no_such_user
         end
