@@ -41,6 +41,7 @@ pre_connected_loop(Socket) ->
             ParsedJson = jsx:decode(Data, [{labels, atom}, return_maps]),
             io:format("~p~n",[ParsedJson]),
             MessageType = getMessageType(Data),
+            io:format("~p~n",[MessageType]),
 
             case MessageType of
 
@@ -141,7 +142,7 @@ connected_loop(Socket) ->
 %     string:strip(Data, both, $\n).
 
 getMessageType(Data) ->
-    maps:get(name, maps:get(type, jsx:decode(Data, [{labels, atom}, return_maps]))).
+    maps:get(type, jsx:decode(Data, [{labels, atom}, return_maps])).
 
 status_reply(Socket, Status) ->
     io:format("Status sent: ~p~n", [Status]),
