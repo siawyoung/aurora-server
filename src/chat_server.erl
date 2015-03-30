@@ -40,49 +40,32 @@ pre_connected_loop(Socket) ->
             % Message = binary_to_list(Data),
             ParsedJson = jsx:decode(Data, [{labels, atom}, return_maps]),
             io:format("~p~n",[ParsedJson]),
-            MessageType = getMessageType(ParsedJson),
+            MessageType = getMessageType(Data),
 
             case MessageType of
 
                 <<"AUTH">> ->
+
                     Status = register_user(Data, Socket),
 
                     case Status of
                         ok ->
-                            status_reply(Socket, 1);
-                            % connected_loop(Socket);
+                            status_reply(Socket, 1),
+                            connected_loop(Socket);
+
                         error ->
-                            status_reply(Socket, 0),
+                            status_reply(Socket, 3),
                             pre_connected_loop(Socket)
                     end;
 
                 _ ->
-                    status_reply(Socket, 0),
-                    pre_connected_loop(Socket)
-                
+                    status_reply(Socket, 6)
+
             end;
 
 
-            % io:format("Data: ~p~n", [Test]),
-            % io:format("Thing: ~p~n", [maps:get(fromID,Test)]),
-            % io:format("Thing: ~p~n", [maps:get(name,maps:get(type,Test))]),
-            
             % Haha = jsx:encode(find_user("sy")),
             % Haha = jsx:encode(#{<<"name">> => list_to_binary(Qs), <<"location">> => "asdasd", <<"socket">> => "qdwd"}),
-
-            % io:format("Data: ~p~n", [Haha]),
-
-            % gen_tcp:send(Socket, Haha),
-
-            % {Command, [_|Name]} = lists:splitwith(fun(T) -> [T] =/= ":" end, Message),
-            % io:format("Command: ~p~n", [Command]),
-            % case Command of
-            %     "CONNECT" ->
-            %         try_connection(clean(Name), Socket);
-            %     _ ->
-            %         gen_tcp:send(Socket, "TCP_CONNECTION_ERROR: Unknown command.\n"),
-            %         pre_connected_loop(Socket)
-            % end;
 
         {error, closed} ->
             ok
@@ -90,23 +73,48 @@ pre_connected_loop(Socket) ->
 
 
 
-connected_loop(Name, Socket) ->
+connected_loop(Socket) ->
     case gen_tcp:recv(Socket, 0) of
 
         {ok, Data} ->
-            
-            % server stdout
+
             ParsedJson = jsx:decode(Data, [{labels, atom}, return_maps]),
             io:format("~p~n",[ParsedJson]),
-            MessageType = getMessageType(ParsedJson),
+            MessageType = getMessageType(Data),
 
-            case MessageType of
+            case validMainMessageType(MessageType) of
 
-                <<"TEXT">> ->
-                    connected_loop(Name, Socket)
+                valid ->
 
-                _ ->
-                    connected_loop(Name, Socket)
+                    AuthorizedStatus = authorize_request(Data),
+
+                    if 
+                        AuthorizedStatus =/= authorized ->
+                            
+                            %% Session tokens don't match
+                            status_reply(Socket, 4),
+                            connected_loop(Socket);
+
+                        true ->
+                        
+                            case MessageType of
+
+                                <<"TEXT">> ->
+                                    io:format("something~n",[]),
+
+                                    status_reply(Socket, 1),
+                                    connected_loop(Socket);
+
+                                <<"CREATE_ROOM">> ->
+                                    connected_loop(Socket)
+                            end
+
+                    end;
+
+                not_valid ->
+                    status_reply(Socket, 6),
+                    connected_loop(Socket)
+
             end;
 
         {error, closed} ->
@@ -129,11 +137,24 @@ getMessageType(Data) ->
     maps:get(name, maps:get(type, jsx:decode(Data, [{labels, atom}, return_maps]))).
 
 status_reply(Socket, Status) ->
-    % Haha = jsx:encode(#{<<"status">> => Status}),
-    % io:format("Data: ~p~n", [Haha]),
-    % Haha = jsx:encode(#{<<"library">> => <<"jsx">>, <<"awesome">> => true}),
-    % io:format("Data: ~p~n", [Haha]),
     gen_tcp:send(Socket, jsx:encode(#{<<"status">> => Status})).
+
+validMainMessageType(Type) ->
+    case Type of
+        <<"TEXT">>        -> valid;
+        <<"CREATE_ROOM">> -> valid;
+        _                 -> not_valid
+    end.
+
+authorize_request(Data) ->
+
+    Status = gen_server:call(controller, {authorize_request, Data}),
+    io:format("~p~n", [Status]),
+    case Status of
+        authorized   -> authorized;
+        no_such_user -> no_such_user;
+        _            -> error
+    end.
 
 
 % try_connection(Name, Socket) ->

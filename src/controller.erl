@@ -18,15 +18,7 @@ init([]) ->
     State = [],
     {ok, State}.
 
-% handle_call is invoked in response to gen_server:call
-
-
-% Handles calls with 'connect' atom
-% if we can find an existing user, we assume that he's the correct person
-% authentication should be handled at the interface
-
 handle_call({register, Data, Socket}, _From, State) ->
-
     PhoneNumber  = maps:get(from_phone_number, jsx:decode(Data, [{labels, atom}, return_maps])),
     % UserName     = maps:get(username, jsx:decode(Data, [{labels, atom}, return_maps])),
     % SessionToken = maps:get(session_token, jsx:decode(Data, [{labels, atom}, return_maps])),
@@ -52,9 +44,32 @@ handle_call({register, Data, Socket}, _From, State) ->
                 _ ->
                     {reply, error, State}
             end
+    end;
+
+handle_call({authorize_request, Data}, _From, State) ->
+
+    TokenToCheck = maps:get(session_token, jsx:decode(Data, [{labels, atom}, return_maps])),
+    PhoneNumber  = maps:get(from_phone_number, jsx:decode(Data, [{labels, atom}, return_maps])),
+
+    case find_user(PhoneNumber) of
+        #{username     := _UserName, 
+        session_token  := SessionToken, 
+        rooms          := _Rooms, 
+        current_ip     := _IPaddress, 
+        active_socket  := _Socket} ->
+
+        case SessionToken == TokenToCheck of
+            true ->
+                {reply, authorized, State};
+            false ->
+                {reply, error, State}
+
+        end;
+
+        _ ->
+            {reply, no_such_user, State}
+
     end.
-
-
 
 handle_cast(_Message, State) ->
     {noreply, State}.
