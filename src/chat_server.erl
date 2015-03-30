@@ -38,12 +38,9 @@ pre_connected_loop(Socket) ->
         {ok, Data} ->
             % server stdout
             % Message = binary_to_list(Data),
-            Haha = jsx:decode(Data, [{labels, atom}, return_maps]),
-            io:format("~p~n",[Haha]),
-            Blah = maps:get(username, Haha),
-            io:format("~p~n",[Blah]),
-            MessageType = getMessageType(Data),
-            io:format("~p~n",[MessageType]),
+            ParsedJson = jsx:decode(Data, [{labels, atom}, return_maps]),
+            io:format("~p~n",[ParsedJson]),
+            MessageType = getMessageType(ParsedJson),
 
             case MessageType of
 
@@ -99,23 +96,15 @@ connected_loop(Name, Socket) ->
         {ok, Data} ->
             
             % server stdout
-            Message = binary_to_list(Data),
-            % Test = jsx:decode(Data),
-            % io:format("Data: ~p~n", [Test]),
-            io:format("Data: ~p~n", [Message]),
+            ParsedJson = jsx:decode(Data, [{labels, atom}, return_maps]),
+            io:format("~p~n",[ParsedJson]),
+            MessageType = getMessageType(ParsedJson),
 
-            {Command, [_|Content]} = lists:splitwith(fun(T) -> [T] =/= ":" end, Message),
-            case Command of
-                "FIND" ->
-                    find(Name, Socket, clean(Content));
+            case MessageType of
 
-                "SAY" ->
-                    {PeerName, [_|Text]} = lists:splitwith(fun(T) -> [T] =/= ":" end, Content),
-                    io:format("~p, and message is ~p~n", [PeerName, Text]),
-                    talk(Name, Socket, PeerName, clean(Text));
+                <<"TEXT">> ->
+                    connected_loop(Name, Socket)
 
-                "QUIT" ->
-                    quit(Name, Socket);
                 _ ->
                     connected_loop(Name, Socket)
             end;
@@ -125,34 +114,19 @@ connected_loop(Name, Socket) ->
 
     end.
 
-find(Name, Socket, NameToFind) ->
-    gen_server:cast(controller, {find, Socket, NameToFind}),
-    connected_loop(Name, Socket).
+% find(Name, Socket, NameToFind) ->
+%     gen_server:cast(controller, {find, Socket, NameToFind}),
+%     connected_loop(Name, Socket).
 
-talk(OwnName, Socket, PeerName, Message) ->
-    gen_server:cast(controller, {talk, OwnName, Socket, PeerName, Message}),
-    connected_loop(OwnName, Socket).
+% talk(OwnName, Socket, PeerName, Message) ->
+%     gen_server:cast(controller, {talk, OwnName, Socket, PeerName, Message}),
+%     connected_loop(OwnName, Socket).
 
-
-quit(Name, Socket) ->
-    Response = gen_server:call(controller, {disconnect, Name}),
-    case Response of
-        ok ->
-            gen_tcp:send(Socket, "TCP_CONNECTION_TERMINATED: Bye.\n"),
-            gen_server:cast(controller, {left, Name}),
-            ok;
-        user_not_found ->
-            gen_tcp:send(Socket, "TCP_CONNECTION_TERMINATED: Bye with errors.\n"),
-            ok
-    end.
-
-clean(Data) ->
-    string:strip(Data, both, $\n).
+% clean(Data) ->
+%     string:strip(Data, both, $\n).
 
 getMessageType(Data) ->
     maps:get(name, maps:get(type, jsx:decode(Data, [{labels, atom}, return_maps]))).
-
-
 
 status_reply(Socket, Status) ->
     % Haha = jsx:encode(#{<<"status">> => Status}),

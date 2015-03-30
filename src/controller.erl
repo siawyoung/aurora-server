@@ -104,12 +104,12 @@ update_user(Data, Socket) ->
     {ok, {IPaddress, _Port}} = inet:peername(Socket),
 
     F = fun() ->
-        [P] = mnesia:wread({aurora_users, PhoneNumber}),
-        P2 = P#aurora_users{username = UserName, 
-                            session_token = SessionToken,
-                            current_ip = IPaddress,
-                            active_socket = Socket},
-        mnesia:write(P2)
+        [ExistingUser] = mnesia:wread({aurora_users, PhoneNumber}),
+        UpdatedUser = ExistingUser#aurora_users{username      = UserName, 
+                                                session_token = SessionToken,
+                                                current_ip    = IPaddress,
+                                                active_socket = Socket},
+        mnesia:write(UpdatedUser)
         
     end,
     mnesia:activity(transaction, F).
