@@ -46,16 +46,27 @@ pre_connected_loop(Socket) ->
 
                 <<"AUTH">> ->
 
-                    Status = register_user(Data, Socket),
+                    case validateAuthMessage(Data) of
 
-                    case Status of
-                        ok ->
-                            status_reply(Socket, 1),
-                            connected_loop(Socket);
+                        valid_auth_message ->
 
-                        error ->
-                            status_reply(Socket, 3),
+                            Status = register_user(Data, Socket),
+
+                            case Status of
+                                ok ->
+                                    status_reply(Socket, 1),
+                                    connected_loop(Socket);
+
+                                error ->
+                                    status_reply(Socket, 3),
+                                    pre_connected_loop(Socket)
+                            end;
+
+                        invalid_auth_message ->
+
+                            status_reply(Socket, 2),
                             pre_connected_loop(Socket)
+
                     end;
 
                 _ ->
@@ -138,6 +149,21 @@ getMessageType(Data) ->
 
 status_reply(Socket, Status) ->
     gen_tcp:send(Socket, jsx:encode(#{<<"status">> => Status})).
+
+validateAuthMessage(Data) ->
+    ParsedJson   = jsx:decode(Data, [{labels, atom}, return_maps]),
+    UserName     = maps:get(username, ParsedJson, missing_field),
+    SessionToken = maps:get(session_token, ParsedJson, missing_field),
+    PhoneNumber  = maps:get(from_phone_number, ParsedJson, missing_field),
+    
+    case ((UserName == missing_field) or (SessionToken == missing_field) or (PhoneNumber == missing_field)) of
+        true ->
+            io:format("Invalid auth message", []),
+            invalid_auth_message;
+        false ->
+            io:format("Valid auth message", []),
+            valid_auth_message
+    end.
 
 validMainMessageType(Type) ->
     case Type of
