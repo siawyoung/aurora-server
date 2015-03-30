@@ -70,13 +70,9 @@ pre_connected_loop(Socket) ->
                     end;
 
                 _ ->
-                    status_reply(Socket, 6)
+                    status_reply(Socket, 7)
 
             end;
-
-
-            % Haha = jsx:encode(find_user("sy")),
-            % Haha = jsx:encode(#{<<"name">> => list_to_binary(Qs), <<"location">> => "asdasd", <<"socket">> => "qdwd"}),
 
         {error, closed} ->
             ok
@@ -148,6 +144,7 @@ getMessageType(Data) ->
     maps:get(name, maps:get(type, jsx:decode(Data, [{labels, atom}, return_maps]))).
 
 status_reply(Socket, Status) ->
+    io:format("Status sent: ~p~n", [Status]),
     gen_tcp:send(Socket, jsx:encode(#{<<"status">> => Status})).
 
 validateAuthMessage(Data) ->
@@ -158,10 +155,10 @@ validateAuthMessage(Data) ->
     
     case ((UserName == missing_field) or (SessionToken == missing_field) or (PhoneNumber == missing_field)) of
         true ->
-            io:format("Invalid auth message", []),
+            io:format("Invalid auth message~n", []),
             invalid_auth_message;
         false ->
-            io:format("Valid auth message", []),
+            io:format("Valid auth message~n", []),
             valid_auth_message
     end.
 
