@@ -2,6 +2,7 @@
 
 -export([start/1, pre_connected_loop/1]).
 -export([install/1]).
+-export([status_reply/2]).
 
 -record(aurora_users, {phone_number, username, session_token, rooms, current_ip, active_socket}).
 
@@ -26,7 +27,7 @@ install(Nodes) ->
 
 register_user(Data, Socket) ->
     Status = gen_server:call(controller, {register, Data, Socket}),
-    io:format("~p~n", [Status]),
+    io:format("Message sent by register_user method: ~p~n", [Status]),
     case Status of
         ok    -> ok;
         _     -> error
@@ -39,41 +40,40 @@ pre_connected_loop(Socket) ->
             % server stdout
             % Message = binary_to_list(Data),
             ParsedJson = jsx:decode(Data, [{labels, atom}, return_maps]),
-            io:format("~p~n",[ParsedJson]),
-            MessageType = getMessageType(Data),
-            io:format("~p~n",[MessageType]),
+            io:format("Message received by pre_connected_loop:~n~p~n",[ParsedJson]),
+            % MessageType = getMessageType(Data),
 
-            case MessageType of
+            % case MessageType of
 
-                <<"AUTH">> ->
+                % <<"AUTH">> ->
 
-                    case validateAuthMessage(Data) of
+            case validate_auth_message(Data) of
 
-                        valid_auth_message ->
+                valid_auth_message ->
 
-                            Status = register_user(Data, Socket),
+                    Status = register_user(Data, Socket),
 
-                            case Status of
-                                ok ->
-                                    status_reply(Socket, 1),
-                                    connected_loop(Socket);
+                    case Status of
+                        ok ->
+                            status_reply(Socket, 1),
+                            connected_loop(Socket);
 
-                                error ->
-                                    status_reply(Socket, 3),
-                                    pre_connected_loop(Socket)
-                            end;
-
-                        invalid_auth_message ->
-
-                            status_reply(Socket, 2),
+                        error ->
+                            status_reply(Socket, 3),
                             pre_connected_loop(Socket)
-
                     end;
 
-                _ ->
-                    status_reply(Socket, 7)
+                invalid_auth_message ->
+
+                    status_reply(Socket, 2),
+                    pre_connected_loop(Socket)
 
             end;
+
+                % _ ->
+                    % status_reply(Socket, 7)
+
+            % end;
 
         {error, closed} ->
             ok
@@ -87,10 +87,10 @@ connected_loop(Socket) ->
         {ok, Data} ->
 
             ParsedJson = jsx:decode(Data, [{labels, atom}, return_maps]),
-            io:format("~p~n",[ParsedJson]),
+            io:format("Message received by connected_loop:~n~p~n",[ParsedJson]),
             MessageType = getMessageType(Data),
 
-            case validMainMessageType(MessageType) of
+            case valid_main_message_type(MessageType) of
 
                 valid ->
 
@@ -108,9 +108,8 @@ connected_loop(Socket) ->
                             case MessageType of
 
                                 <<"TEXT">> ->
-                                    io:format("something~n",[]),
-
-                                    status_reply(Socket, 1),
+                                    io:format("TEXT MESSAGE SENT~n",[]),
+                                    gen_server:cast(controller, {send_chat_message, Data, Socket}),
                                     connected_loop(Socket);
 
                                 <<"CREATE_ROOM">> ->
@@ -142,28 +141,29 @@ connected_loop(Socket) ->
 %     string:strip(Data, both, $\n).
 
 getMessageType(Data) ->
-    maps:get(type, jsx:decode(Data, [{labels, atom}, return_maps])).
+    maps:get(type, jsx:decode(Data, [{labels, atom}, return_maps]), missing_type).
 
 status_reply(Socket, Status) ->
     io:format("Status sent: ~p~n", [Status]),
     gen_tcp:send(Socket, jsx:encode(#{<<"status">> => Status})).
 
-validateAuthMessage(Data) ->
+validate_auth_message(Data) ->
     ParsedJson   = jsx:decode(Data, [{labels, atom}, return_maps]),
+    Type         = maps:get(type, ParsedJson, missing_field),
     UserName     = maps:get(username, ParsedJson, missing_field),
     SessionToken = maps:get(session_token, ParsedJson, missing_field),
     PhoneNumber  = maps:get(from_phone_number, ParsedJson, missing_field),
     
-    case ((UserName == missing_field) or (SessionToken == missing_field) or (PhoneNumber == missing_field)) of
+    case ((Type =/= <<"AUTH">>) or (UserName == missing_field) or (SessionToken == missing_field) or (PhoneNumber == missing_field)) of
         true ->
-            io:format("Invalid auth message~n", []),
+            io:format("Message from validate_auth_message: Invalid auth message~n", []),
             invalid_auth_message;
         false ->
-            io:format("Valid auth message~n", []),
+            io:format("Message from validate_auth_message: Valid auth message~n", []),
             valid_auth_message
     end.
 
-validMainMessageType(Type) ->
+valid_main_message_type(Type) ->
     case Type of
         <<"TEXT">>        -> valid;
         <<"CREATE_ROOM">> -> valid;
@@ -173,7 +173,7 @@ validMainMessageType(Type) ->
 authorize_request(Data) ->
 
     Status = gen_server:call(controller, {authorize_request, Data}),
-    io:format("~p~n", [Status]),
+    io:format("Message from authorize_request method: ~p~n", [Status]),
     case Status of
         authorized   -> authorized;
         no_such_user -> no_such_user;

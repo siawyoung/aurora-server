@@ -71,6 +71,73 @@ handle_call({authorize_request, Data}, _From, State) ->
 
     end.
 
+async_find_user_and_respond(Data, FromSocket) ->
+    PhoneNumber  = maps:get(to_phone_number, jsx:decode(Data, [{labels, atom}, return_maps])),
+
+    case find_user(PhoneNumber) of
+        #{username     := UserName, 
+        session_token  := SessionToken, 
+        rooms          := Rooms, 
+        current_ip     := IPaddress, 
+        active_socket  := Socket} ->
+
+            #{username      => UserName, 
+              session_token => SessionToken, 
+              rooms         => Rooms, 
+              current_ip    => IPaddress, 
+              active_socket => Socket};
+
+        _ ->
+
+        chat_server:status_reply(FromSocket, 5),
+        no_such_user
+
+    end.
+
+send_message(UserFound, Data, FromSocket) ->
+
+    ParsedJson = jsx:decode(Data, [{labels, atom}, return_maps]),
+
+    FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
+    Message         = maps:get(message, ParsedJson),
+    ChatRoomID      = maps:get(chatroom_id, ParsedJson),
+
+    ToSocket = maps:get(active_socket, UserFound),
+
+    Status = gen_tcp:send(ToSocket, 
+        jsx:encode(#{
+        <<"from_phone_number">> => FromPhoneNumber,
+        <<"chatroom_id">>       => ChatRoomID,
+        <<"message">>           => Message,
+        <<"type">>              => <<"TEXT">>
+        })),
+
+    case Status of
+        ok ->
+            % message sent successfully
+            chat_server:status_reply(FromSocket, 1);
+        _ ->
+            % socket closed
+            chat_server:status_reply(FromSocket, 7)
+    end.
+
+
+handle_cast({send_chat_message, Data, FromSocket}, State) ->
+    
+    UserFound = async_find_user_and_respond(Data, FromSocket),
+
+    if 
+        UserFound =/= no_such_user ->
+
+            send_message(UserFound, Data, FromSocket);
+
+        true -> error
+
+    end,
+
+    
+    {noreply, State};
+
 handle_cast(_Message, State) ->
     {noreply, State}.
 
