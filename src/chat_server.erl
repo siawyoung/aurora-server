@@ -2,7 +2,7 @@
 
 -export([start/1, pre_connected_loop/1]).
 -export([install/1]).
--export([status_reply/2]).
+-export([status_reply/2, status_reply/3, status_reply/4]).
 
 -record(aurora_users, {phone_number, username, session_token, rooms, current_ip, active_socket}).
 
@@ -19,20 +19,6 @@ install(Nodes) ->
                          {disc_copies, Nodes},
                          {type, set}]).
 
-
-% this function is run at the start, and looks for messages of the form
-% CONNECT:______
-% if doesn't it just sends Unknown command and quits
-% Shouldn't be an issue, since the server is going to be interfaced by the app anyway, the app can prepend the TCP message with CONNECT: before attempting to connect
-
-register_user(Data, Socket) ->
-    Status = gen_server:call(controller, {register, Data, Socket}),
-    io:format("Message sent by register_user method: ~p~n", [Status]),
-    case Status of
-        ok    -> ok;
-        _     -> error
-    end.
-
 pre_connected_loop(Socket) ->
     case gen_tcp:recv(Socket, 0) of
 
@@ -41,17 +27,17 @@ pre_connected_loop(Socket) ->
             % Message = binary_to_list(Data),
             ParsedJson = jsx:decode(Data, [{labels, atom}, return_maps]),
             io:format("Message received by pre_connected_loop:~n~p~n",[ParsedJson]),
-            % MessageType = getMessageType(Data),
+            % MessageType = get_message_type(Data),
 
             % case MessageType of
 
                 % <<"AUTH">> ->
 
-            case validate_auth_message(Data) of
+            case validate_auth_message(ParsedJson) of
 
                 valid_auth_message ->
 
-                    Status = register_user(Data, Socket),
+                    Status = register_user(ParsedJson, Socket),
 
                     case Status of
                         ok ->
@@ -88,13 +74,13 @@ connected_loop(Socket) ->
 
             ParsedJson = jsx:decode(Data, [{labels, atom}, return_maps]),
             io:format("Message received by connected_loop:~n~p~n",[ParsedJson]),
-            MessageType = getMessageType(Data),
+            MessageType = get_message_type(ParsedJson),
 
-            case valid_main_message_type(MessageType) of
+            case validate_message(MessageType) of
 
                 valid ->
 
-                    AuthorizedStatus = authorize_request(Data),
+                    AuthorizedStatus = authorize_request(ParsedJson),
 
                     if 
                         AuthorizedStatus =/= authorized ->
@@ -104,12 +90,15 @@ connected_loop(Socket) ->
                             connected_loop(Socket);
 
                         true ->
+
+                            % update the socket here in case it has changed
+                            update_socket(ParsedJson, Socket),
                         
                             case MessageType of
 
                                 <<"TEXT">> ->
                                     io:format("TEXT MESSAGE SENT~n",[]),
-                                    gen_server:cast(controller, {send_chat_message, Data, Socket}),
+                                    gen_server:cast(controller, {send_chat_message, ParsedJson, Socket}),
                                     connected_loop(Socket);
 
                                 <<"CREATE_ROOM">> ->
@@ -129,26 +118,30 @@ connected_loop(Socket) ->
 
     end.
 
-% find(Name, Socket, NameToFind) ->
-%     gen_server:cast(controller, {find, Socket, NameToFind}),
-%     connected_loop(Name, Socket).
+register_user(ParsedJson, Socket) ->
+    Status = gen_server:call(controller, {register, ParsedJson, Socket}),
+    io:format("Message sent by register_user method: ~p~n", [Status]),
+    case Status of
+        ok    -> ok;
+        _     -> error
+    end.
 
-% talk(OwnName, Socket, PeerName, Message) ->
-%     gen_server:cast(controller, {talk, OwnName, Socket, PeerName, Message}),
-%     connected_loop(OwnName, Socket).
-
-% clean(Data) ->
-%     string:strip(Data, both, $\n).
-
-getMessageType(Data) ->
-    maps:get(type, jsx:decode(Data, [{labels, atom}, return_maps]), missing_type).
+get_message_type(ParsedJson) ->
+    maps:get(type, ParsedJson, missing_type).
 
 status_reply(Socket, Status) ->
     io:format("Status sent: ~p~n", [Status]),
     gen_tcp:send(Socket, jsx:encode(#{<<"status">> => Status})).
 
-validate_auth_message(Data) ->
-    ParsedJson   = jsx:decode(Data, [{labels, atom}, return_maps]),
+status_reply(Socket, Status, Type) ->
+    io:format("Status sent: ~p~n", [Status]),
+    gen_tcp:send(Socket, jsx:encode(#{<<"status">> => Status, <<"type">> => Type})).
+
+status_reply(Socket, Status, Type, Message) ->
+    io:format("Status sent: ~p~n", [Status]),
+    gen_tcp:send(Socket, jsx:encode(#{<<"status">> => Status, <<"type">> => Type, <<"message">> => Message})).
+
+validate_auth_message(ParsedJson) ->
     Type         = maps:get(type, ParsedJson, missing_field),
     UserName     = maps:get(username, ParsedJson, missing_field),
     SessionToken = maps:get(session_token, ParsedJson, missing_field),
@@ -163,16 +156,19 @@ validate_auth_message(Data) ->
             valid_auth_message
     end.
 
-valid_main_message_type(Type) ->
+validate_message(Type) ->
     case Type of
         <<"TEXT">>        -> valid;
         <<"CREATE_ROOM">> -> valid;
         _                 -> not_valid
     end.
 
-authorize_request(Data) ->
+update_socket(ParsedJson, Socket) ->
+    gen_server:cast(controller, {update_socket, ParsedJson}).
 
-    Status = gen_server:call(controller, {authorize_request, Data}),
+authorize_request(ParsedJson) ->
+
+    Status = gen_server:call(controller, {authorize_request, ParsedJson}),
     io:format("Message from authorize_request method: ~p~n", [Status]),
     case Status of
         authorized   -> authorized;
@@ -180,6 +176,17 @@ authorize_request(Data) ->
         _            -> error
     end.
 
+
+% find(Name, Socket, NameToFind) ->
+%     gen_server:cast(controller, {find, Socket, NameToFind}),
+%     connected_loop(Name, Socket).
+
+% talk(OwnName, Socket, PeerName, Message) ->
+%     gen_server:cast(controller, {talk, OwnName, Socket, PeerName, Message}),
+%     connected_loop(OwnName, Socket).
+
+% clean(Data) ->
+%     string:strip(Data, both, $\n).
 
 % try_connection(Name, Socket) ->
 %     Response = gen_server:call(controller, {connect, Name, Socket}),

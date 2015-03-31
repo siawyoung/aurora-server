@@ -18,8 +18,8 @@ init([]) ->
     State = [],
     {ok, State}.
 
-handle_call({register, Data, Socket}, _From, State) ->
-    PhoneNumber  = maps:get(from_phone_number, jsx:decode(Data, [{labels, atom}, return_maps])),
+handle_call({register, ParsedJson, Socket}, _From, State) ->
+    PhoneNumber  = maps:get(from_phone_number, ParsedJson),
     % UserName     = maps:get(username, jsx:decode(Data, [{labels, atom}, return_maps])),
     % SessionToken = maps:get(session_token, jsx:decode(Data, [{labels, atom}, return_maps])),
 
@@ -27,7 +27,7 @@ handle_call({register, Data, Socket}, _From, State) ->
 
         user_exists ->
             
-            Status = update_user(Data, Socket),
+            Status = update_user(ParsedJson, Socket),
             case Status of
                 % return value from update_user mnesia database transaction
                 ok ->
@@ -37,7 +37,7 @@ handle_call({register, Data, Socket}, _From, State) ->
             end;
 
         no_such_user ->
-            Status = add_user(Data, Socket),
+            Status = add_user(ParsedJson, Socket),
             case Status of
                 ok ->
                     {reply, ok, State};
@@ -46,10 +46,10 @@ handle_call({register, Data, Socket}, _From, State) ->
             end
     end;
 
-handle_call({authorize_request, Data}, _From, State) ->
+handle_call({authorize_request, ParsedJson}, _From, State) ->
 
-    TokenToCheck = maps:get(session_token, jsx:decode(Data, [{labels, atom}, return_maps])),
-    PhoneNumber  = maps:get(from_phone_number, jsx:decode(Data, [{labels, atom}, return_maps])),
+    TokenToCheck = maps:get(session_token, ParsedJson),
+    PhoneNumber  = maps:get(from_phone_number, ParsedJson),
 
     case find_user(PhoneNumber) of
         #{username     := _UserName, 
@@ -58,21 +58,22 @@ handle_call({authorize_request, Data}, _From, State) ->
         current_ip     := _IPaddress, 
         active_socket  := _Socket} ->
 
-        case SessionToken == TokenToCheck of
-            true ->
-                {reply, authorized, State};
-            false ->
-                {reply, error, State}
+            case SessionToken == TokenToCheck of
+                true ->
+                    {reply, authorized, State};
+                false ->
+                    {reply, error, State}
 
-        end;
+            end;
 
         _ ->
             {reply, no_such_user, State}
 
     end.
 
-async_find_user_and_respond(Data, FromSocket) ->
-    PhoneNumber  = maps:get(to_phone_number, jsx:decode(Data, [{labels, atom}, return_maps])),
+async_find_user_and_respond(ParsedJson, FromSocket) ->
+
+    PhoneNumber  = maps:get(to_phone_number, ParsedJson),
 
     case find_user(PhoneNumber) of
         #{username     := UserName, 
@@ -94,9 +95,7 @@ async_find_user_and_respond(Data, FromSocket) ->
 
     end.
 
-send_message(UserFound, Data, FromSocket) ->
-
-    ParsedJson = jsx:decode(Data, [{labels, atom}, return_maps]),
+send_message(UserFound, ParsedJson, FromSocket) ->
 
     FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
     Message         = maps:get(message, ParsedJson),
@@ -122,14 +121,14 @@ send_message(UserFound, Data, FromSocket) ->
     end.
 
 
-handle_cast({send_chat_message, Data, FromSocket}, State) ->
+handle_cast({send_chat_message, ParsedJson, FromSocket}, State) ->
     
-    UserFound = async_find_user_and_respond(Data, FromSocket),
+    UserFound = async_find_user_and_respond(ParsedJson, FromSocket),
 
     if 
         UserFound =/= no_such_user ->
 
-            send_message(UserFound, Data, FromSocket);
+            send_message(UserFound, ParsedJson, FromSocket);
 
         true -> error
 
@@ -178,11 +177,10 @@ find_user(PhoneNumber) ->
     end,
     mnesia:activity(transaction, F).
 
-update_user(Data, Socket) ->
-
-    PhoneNumber  = maps:get(from_phone_number, jsx:decode(Data, [{labels, atom}, return_maps])),
-    UserName     = maps:get(username, jsx:decode(Data, [{labels, atom}, return_maps])),
-    SessionToken = maps:get(session_token, jsx:decode(Data, [{labels, atom}, return_maps])),
+update_user(ParsedJson, Socket) ->
+    PhoneNumber  = maps:get(from_phone_number, ParsedJson),
+    UserName     = maps:get(username, ParsedJson),
+    SessionToken = maps:get(session_token, ParsedJson),
     {ok, {IPaddress, _Port}} = inet:peername(Socket),
 
     F = fun() ->
@@ -198,11 +196,10 @@ update_user(Data, Socket) ->
 
 % -record(aurora_users, {phone_number, username, session_token, rooms, current_ip, active_socket}).
 
-add_user(Data, Socket) ->
-
-    PhoneNumber  = maps:get(from_phone_number, jsx:decode(Data, [{labels, atom}, return_maps])),
-    UserName     = maps:get(username, jsx:decode(Data, [{labels, atom}, return_maps])),
-    SessionToken = maps:get(session_token, jsx:decode(Data, [{labels, atom}, return_maps])),
+add_user(ParsedJson, Socket) ->
+    PhoneNumber  = maps:get(from_phone_number, ParsedJson),
+    UserName     = maps:get(username, ParsedJson),
+    SessionToken = maps:get(session_token, ParsedJson),
     {ok, {IPaddress, _Port}} = inet:peername(Socket),
 
     F = fun() ->
