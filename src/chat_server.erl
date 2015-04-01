@@ -5,6 +5,7 @@
 -export([status_reply/2, status_reply/3, status_reply/4]).
 
 -record(aurora_users, {phone_number, username, session_token, rooms, current_ip, active_socket}).
+-record(aurora_chatrooms, {chatroom_id, chatroom_name, room_users, admin_user}).
 
 start(Port) ->
     mnesia:wait_for_tables([aurora_users], 5000),
@@ -16,6 +17,10 @@ install(Nodes) ->
     rpc:multicall(Nodes, application, start, [mnesia]),
     mnesia:create_table(aurora_users,
                         [{attributes, record_info(fields, aurora_users)},
+                         {disc_copies, Nodes},
+                         {type, set}]),
+    mnesia:create_table(aurora_chatrooms,
+                        [{attributes, record_info(fields, aurora_chatrooms)},
                          {disc_copies, Nodes},
                          {type, set}]).
 
@@ -41,17 +46,17 @@ pre_connected_loop(Socket) ->
 
                     case Status of
                         ok ->
-                            status_reply(Socket, 1),
+                            status_reply(Socket, 1, <<"AUTH">>),
                             connected_loop(Socket);
 
                         error ->
-                            status_reply(Socket, 3),
+                            status_reply(Socket, 3, <<"AUTH">>),
                             pre_connected_loop(Socket)
                     end;
 
                 invalid_auth_message ->
 
-                    status_reply(Socket, 2),
+                    status_reply(Socket, 2, <<"AUTH">>),
                     pre_connected_loop(Socket)
 
             end;
@@ -80,7 +85,7 @@ connected_loop(Socket) ->
 
                 valid ->
 
-                    AuthorizedStatus = authorize_request(ParsedJson),
+                    AuthorizedStatus = call_authorize_request(ParsedJson),
 
                     if 
                         AuthorizedStatus =/= authorized ->
@@ -91,8 +96,9 @@ connected_loop(Socket) ->
 
                         true ->
 
-                            % update the socket here in case it has changed
-                            update_socket(ParsedJson, Socket),
+                            % we update the socket upon auth, but in case it changes
+                            % we update the socket in every message, after successful authorization
+                            cast_update_socket(ParsedJson, Socket),
                         
                             case MessageType of
 
@@ -102,6 +108,8 @@ connected_loop(Socket) ->
                                     connected_loop(Socket);
 
                                 <<"CREATE_ROOM">> ->
+                                    io:format("CREATE_ROOM MESSAGE SENT~n",[]),
+                                    gen_server:cast(controller, {create_chatroom, ParsedJson, Socket}),
                                     connected_loop(Socket)
                             end
 
@@ -163,10 +171,10 @@ validate_message(Type) ->
         _                 -> not_valid
     end.
 
-update_socket(ParsedJson, Socket) ->
-    gen_server:cast(controller, {update_socket, ParsedJson}).
+cast_update_socket(ParsedJson, Socket) ->
+    gen_server:cast(controller, {update_socket, ParsedJson, Socket}).
 
-authorize_request(ParsedJson) ->
+call_authorize_request(ParsedJson) ->
 
     Status = gen_server:call(controller, {authorize_request, ParsedJson}),
     io:format("Message from authorize_request method: ~p~n", [Status]),

@@ -3,12 +3,12 @@
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 -export([start/0]).
+-export([random_id_generator/0]).
 
 -record(aurora_users, {phone_number, username, session_token, rooms, current_ip, active_socket}).
+-record(aurora_chatrooms, {chatroom_id, chatroom_name, room_users, admin_user}).
 % -record(aurora_messages, {userID, message, chatRoomID, timestamp}).
-% -record(aurora_chatrooms, {chatRoomID, roomUsers, adminUser}).
 % -record(aurora_notes, {userID, message}).
-
 
 start() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
@@ -37,7 +37,7 @@ handle_call({register, ParsedJson, Socket}, _From, State) ->
             end;
 
         no_such_user ->
-            Status = add_user(ParsedJson, Socket),
+            Status = create_user(ParsedJson, Socket),
             case Status of
                 ok ->
                     {reply, ok, State};
@@ -71,6 +71,72 @@ handle_call({authorize_request, ParsedJson}, _From, State) ->
 
     end.
 
+
+
+handle_cast({send_chat_message, ParsedJson, FromSocket}, State) ->
+    
+    UserFound = async_find_user_and_respond(ParsedJson, FromSocket),
+
+    if 
+        UserFound =/= no_such_user ->
+
+            send_message(UserFound, ParsedJson, FromSocket);
+
+        true -> error
+
+    end,
+
+    
+    {noreply, State};
+
+% update_socket shouldn't respond, even if it fails
+
+handle_cast({update_socket, ParsedJson, SocketToUpdate}, State) ->
+
+    update_socket(ParsedJson, SocketToUpdate),
+    {noreply, State};
+
+handle_cast({create_chatroom, ParsedJson, FromSocket}, State) ->
+
+    Users = maps:get(users, ParsedJson),
+
+    ValidateResult = validate_users(Users),
+
+    case ValidateResult of
+
+        {ok, users_validated, UserSockets} ->
+    
+            DatabaseResult = create_chatroom(ParsedJson),
+            case DatabaseResult of
+                {ok, room_created, ChatRoomId, ChatRoomName, Users} ->
+
+                    chat_server:status_reply(FromSocket, 1, <<"CREATE_ROOM">>),
+
+                    % send status to all users
+                    F = fun(Socket) ->
+                        send_chatroom_invitation(ChatRoomId, ChatRoomName, Users, Socket)
+                    end,
+                    lists:foreach(F, UserSockets);
+
+                error ->
+                    chat_server:status_reply(FromSocket, 3, <<"CREATE_ROOM">>)
+            end;
+
+        error ->
+
+            chat_server:status_reply(FromSocket, 5, <<"CREATE_ROOM">>)
+    end,
+
+    {noreply, State};
+
+handle_cast(_Message, State) ->
+    {noreply, State}.
+
+
+%%%%%%%%%%%%%%%%%%%%%
+%%% Main functions
+%%%%%%%%%%%%%%%%%%%%%
+
 async_find_user_and_respond(ParsedJson, FromSocket) ->
 
     PhoneNumber  = maps:get(to_phone_number, ParsedJson),
@@ -99,14 +165,14 @@ send_message(UserFound, ParsedJson, FromSocket) ->
 
     FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
     Message         = maps:get(message, ParsedJson),
-    ChatRoomID      = maps:get(chatroom_id, ParsedJson),
+    ChatRoomId      = maps:get(chatroom_id, ParsedJson),
 
     ToSocket = maps:get(active_socket, UserFound),
 
     Status = gen_tcp:send(ToSocket, 
         jsx:encode(#{
         <<"from_phone_number">> => FromPhoneNumber,
-        <<"chatroom_id">>       => ChatRoomID,
+        <<"chatroom_id">>       => ChatRoomId,
         <<"message">>           => Message,
         <<"type">>              => <<"TEXT">>
         })),
@@ -121,24 +187,43 @@ send_message(UserFound, ParsedJson, FromSocket) ->
     end.
 
 
-handle_cast({send_chat_message, ParsedJson, FromSocket}, State) ->
+send_chatroom_invitation(ChatRoomId, ChatRoomName, Users, Socket) ->
+
+    Status = gen_tcp:send(Socket, 
+        jsx:encode(#{
+            <<"chatroom_id">> => ChatRoomId,
+            <<"chatroom_name">> => ChatRoomName,
+            <<"users">> => Users,
+            <<"type">> => <<"ROOM_INVITATION">>
+        })).
+
+validate_users(Users) ->
     
-    UserFound = async_find_user_and_respond(ParsedJson, FromSocket),
+    F = fun(UserPhoneNumber) ->
+        DatabaseResult = find_user(list_to_binary(UserPhoneNumber)),
+        io:format("~p~p~n", [UserPhoneNumber, DatabaseResult]),
+        case DatabaseResult of
+            #{username     := _UserName, 
+            session_token  := _SessionToken, 
+            rooms          := _Rooms, 
+            current_ip     := _IPaddress, 
+            active_socket  := Socket} ->
 
-    if 
-        UserFound =/= no_such_user ->
+                Socket;
 
-            send_message(UserFound, ParsedJson, FromSocket);
-
-        true -> error
-
+            no_such_user -> no_such_user
+        end
     end,
 
-    
-    {noreply, State};
+    UserSockets = lists:map(F, Users),
+    io:format("validate_users debug message: ~p~n", [UserSockets]),
 
-handle_cast(_Message, State) ->
-    {noreply, State}.
+    case lists:member(no_such_user, UserSockets) of
+        true ->
+            error;
+        false ->
+            {ok, users_validated, UserSockets}
+    end.
 
 %%%%%%%%%%%%%%%%%%%%
 %%% Mnesia interface
@@ -194,9 +279,19 @@ update_user(ParsedJson, Socket) ->
     end,
     mnesia:activity(transaction, F).
 
-% -record(aurora_users, {phone_number, username, session_token, rooms, current_ip, active_socket}).
+update_socket(ParsedJson, Socket) ->
+    PhoneNumber  = maps:get(from_phone_number, ParsedJson),
+    {ok, {IPaddress, _Port}} = inet:peername(Socket),
+    F = fun() ->
+        [ExistingUser] = mnesia:wread({aurora_users, PhoneNumber}),
+        UpdatedUser = ExistingUser#aurora_users{current_ip    = IPaddress,
+                                                active_socket = Socket},
+        mnesia:write(UpdatedUser)
+        
+    end,
+    mnesia:activity(transaction, F).
 
-add_user(ParsedJson, Socket) ->
+create_user(ParsedJson, Socket) ->
     PhoneNumber  = maps:get(from_phone_number, ParsedJson),
     UserName     = maps:get(username, ParsedJson),
     SessionToken = maps:get(session_token, ParsedJson),
@@ -211,22 +306,48 @@ add_user(ParsedJson, Socket) ->
     end,
     mnesia:activity(transaction, F).
 
-% delete_user(Name) ->
-%     F = fun() ->
-%         mnesia:delete(aurora_users, Name)
-%     end,
-%     mnesia:activity(transaction, F).
+delete_user(ParsedJson) ->
+    PhoneNumber  = maps:get(from_phone_number, ParsedJson),
+
+    F = fun() ->
+        mnesia:delete(aurora_users, PhoneNumber)
+    end,
+    mnesia:activity(transaction, F).
+
+create_chatroom(ParsedJson) ->
+
+    AdminUser    = maps:get(from_phone_number, ParsedJson),
+    ChatRoomName = maps:get(chatroom_name, ParsedJson),
+    Users        = maps:get(users, ParsedJson),
+    ChatRoomId   = random_id_generator(),
+
+    F = fun() ->
+        Status = mnesia:write(#aurora_chatrooms{chatroom_id   = ChatRoomId,
+                                                admin_user    = AdminUser,
+                                                chatroom_name = ChatRoomName,
+                                                room_users    = Users}),
+        case Status of
+            ok -> {ok, room_created, ChatRoomId, ChatRoomName, Users};
+            _  -> error
+        end
+
+    end,
+    mnesia:activity(transaction, F).
 
 % create_room(Name, RoomName) ->
     
 
-% add_user_to_room(Name, RoomId)
+% create_user_to_room(Name, RoomId)
 % leave_room(Name, RoomId)
 % delete_room(Name, RoomId) % to verify that he's indeed the admin of the room
 
 %%%%%%%%%%%%%%%%%%%%
 %%% Auxilliary functions
 %%%%%%%%%%%%%%%%%%%%
+
+random_id_generator() -> 
+    <<I:160/integer>> = crypto:hash(sha,term_to_binary({make_ref(), now()})), 
+    erlang:integer_to_list(I, 16).
 
 % trim_whitespace(Input) ->
 %    string:strip(Input, both, $\r).
@@ -240,7 +361,7 @@ code_change(_OldVersion, State, _Extra) -> {ok, State}.
 
 %     case Message of
 %         {connect, Name, Socket} ->
-%             case add_user(Name, Socket) of
+%             case create_user(Name, Socket) of
 %                 ok ->
 %                     {reply, ok, State};
 %                 _ ->
