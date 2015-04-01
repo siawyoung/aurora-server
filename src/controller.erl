@@ -98,7 +98,7 @@ handle_cast({update_socket, ParsedJson, SocketToUpdate}, State) ->
 
 handle_cast({create_chatroom, ParsedJson, FromSocket}, State) ->
 
-    Users = maps:get(users, ParsedJson),
+    Users = convert_string_list_to_binary(maps:get(users, ParsedJson)),
 
     ValidateResult = validate_users(Users),
 
@@ -200,7 +200,8 @@ send_chatroom_invitation(ChatRoomId, ChatRoomName, Users, Socket) ->
 validate_users(Users) ->
     
     F = fun(UserPhoneNumber) ->
-        DatabaseResult = find_user(list_to_binary(UserPhoneNumber)),
+
+        DatabaseResult = find_user(UserPhoneNumber),
         io:format("~p~p~n", [UserPhoneNumber, DatabaseResult]),
         case DatabaseResult of
             #{username     := _UserName, 
@@ -318,7 +319,7 @@ create_chatroom(ParsedJson) ->
 
     AdminUser    = maps:get(from_phone_number, ParsedJson),
     ChatRoomName = maps:get(chatroom_name, ParsedJson),
-    Users        = lists:map(fun(Item) -> list_to_binary(Item) end, maps:get(users, ParsedJson)),
+    Users        = maps:get(users, ParsedJson),
 
     ChatRoomId   = random_id_generator(),
 
@@ -349,6 +350,17 @@ create_chatroom(ParsedJson) ->
 random_id_generator() -> 
     <<I:160/integer>> = crypto:hash(sha,term_to_binary({make_ref(), now()})), 
     erlang:integer_to_list(I, 16).
+
+convert_string_list_to_binary(List) ->
+    F = fun(Item) ->
+        case is_binary(Item) of
+            true ->
+                Item;
+            false ->
+                list_to_binary(Item)
+        end
+    end,
+    lists:map(F, List).
 
 % trim_whitespace(Input) ->
 %    string:strip(Input, both, $\r).
