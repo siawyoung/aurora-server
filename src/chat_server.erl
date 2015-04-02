@@ -98,6 +98,7 @@ connected_loop(Socket) ->
 
                             % we update the socket upon auth, but in case it changes
                             % we update the socket in every message, after successful authorization
+                            % TODO: after updating, send all backdated messages to this socket
                             cast_update_socket(ParsedJson, Socket),
                         
                             case MessageType of

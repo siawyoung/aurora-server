@@ -3,10 +3,12 @@
 
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 -export([start/0]).
--export([random_id_generator/0]).
+
+-export([find_chatroom/1]).
 
 -record(aurora_users, {phone_number, username, session_token, rooms, current_ip, active_socket}).
 -record(aurora_chatrooms, {chatroom_id, chatroom_name, room_users, admin_user}).
+% -record(aurora_backlog, {phone_number, message}).
 % -record(aurora_messages, {userID, message, chatRoomID, timestamp}).
 % -record(aurora_notes, {userID, message}).
 
@@ -74,18 +76,30 @@ handle_call({authorize_request, ParsedJson}, _From, State) ->
 
 
 handle_cast({send_chat_message, ParsedJson, FromSocket}, State) ->
+
+    FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
+    RoomInfo = async_find_room_and_respond(ParsedJson, FromSocket),
+
+    case RoomInfo of
+
+        no_such_room -> error;
+
+        _ ->
     
-    UserFound = async_find_user_and_respond(ParsedJson, FromSocket),
+            UserNumbersFound = maps:get(room_users, RoomInfo),
 
-    if 
-        UserFound =/= no_such_user ->
+            F = fun(UserNumber) ->
+                % skip the sender's own number
+                case UserNumber =/= FromPhoneNumber of 
+                    true ->
+                        User = find_user(UserNumber),
+                        send_message(User, ParsedJson, FromSocket);
+                    false -> skip
+                end
+            end,
 
-            send_message(UserFound, ParsedJson, FromSocket);
-
-        true -> error
-
+            lists:foreach(F, UserNumbersFound)
     end,
-
     
     {noreply, State};
 
@@ -110,7 +124,12 @@ handle_cast({create_chatroom, ParsedJson, FromSocket}, State) ->
             case DatabaseResult of
                 {ok, room_created, ChatRoomId, ChatRoomName, Users} ->
 
-                    chat_server:status_reply(FromSocket, 1, <<"CREATE_ROOM">>),
+                    % no need to abtract out yet??
+                    gen_tcp:send(FromSocket, jsx:encode(#{
+                        <<"status">>        => 1,
+                        <<"chatroom_id">>   => ChatRoomId,
+                        <<"type">>          => <<"CREATE_ROOM">>
+                    })),
 
                     % send status to all users
                     F = fun(Socket) ->
@@ -149,15 +168,35 @@ async_find_user_and_respond(ParsedJson, FromSocket) ->
         active_socket  := Socket} ->
 
             #{username      => UserName, 
-              session_token => SessionToken, 
+              session_token => SessionToken,
               rooms         => Rooms, 
               current_ip    => IPaddress, 
               active_socket => Socket};
 
         _ ->
 
-        chat_server:status_reply(FromSocket, 5),
-        no_such_user
+            chat_server:status_reply(FromSocket, 5),
+            no_such_user
+
+    end.
+
+async_find_room_and_respond(ParsedJson, FromSocket) ->
+
+    ChatRoomId  = maps:get(chatroom_id, ParsedJson),
+
+    case find_chatroom(ChatRoomId) of
+        #{chatroom_name := ChatRoomName, 
+          room_users    := RoomUsers, 
+          admin_user    := AdminUser} ->
+
+            #{chatroom_name => ChatRoomName, 
+              room_users    => RoomUsers, 
+              admin_user    => AdminUser};
+
+        _ ->
+
+            chat_server:status_reply(FromSocket, 5),
+            no_such_room
 
     end.
 
@@ -180,10 +219,10 @@ send_message(UserFound, ParsedJson, FromSocket) ->
     case Status of
         ok ->
             % message sent successfully
-            chat_server:status_reply(FromSocket, 1);
+            chat_server:status_reply(FromSocket, 1, <<"TEXT">>, maps:get(phone_number, UserFound));
         _ ->
             % socket closed
-            chat_server:status_reply(FromSocket, 7)
+            chat_server:status_reply(FromSocket, 7, <<"TEXT">>)
     end.
 
 
@@ -191,10 +230,10 @@ send_chatroom_invitation(ChatRoomId, ChatRoomName, Users, Socket) ->
 
     Status = gen_tcp:send(Socket, 
         jsx:encode(#{
-            <<"chatroom_id">> => ChatRoomId,
+            <<"chatroom_id">>   => ChatRoomId,
             <<"chatroom_name">> => ChatRoomName,
-            <<"users">> => Users,
-            <<"type">> => <<"ROOM_INVITATION">>
+            <<"users">>         => Users,
+            <<"type">>          => <<"ROOM_INVITATION">>
         })).
 
 validate_users(Users) ->
@@ -250,11 +289,12 @@ find_user(PhoneNumber) ->
                            current_ip    = IPaddress,
                            active_socket = Socket}] ->
 
-                #{username    => UserName, 
-                session_token => SessionToken, 
-                rooms         => Rooms, 
-                current_ip    => IPaddress, 
-                active_socket => Socket};
+                #{phone_number => PhoneNumber,
+                username       => UserName, 
+                session_token  => SessionToken, 
+                rooms          => Rooms, 
+                current_ip     => IPaddress, 
+                active_socket  => Socket};
             % [H|_T] ->
             %     H;
             _ ->
@@ -307,13 +347,13 @@ create_user(ParsedJson, Socket) ->
     end,
     mnesia:activity(transaction, F).
 
-delete_user(ParsedJson) ->
-    PhoneNumber  = maps:get(from_phone_number, ParsedJson),
+% delete_user(ParsedJson) ->
+%     PhoneNumber  = maps:get(from_phone_number, ParsedJson),
 
-    F = fun() ->
-        mnesia:delete(aurora_users, PhoneNumber)
-    end,
-    mnesia:activity(transaction, F).
+%     F = fun() ->
+%         mnesia:delete(aurora_users, PhoneNumber)
+%     end,
+%     mnesia:activity(transaction, F).
 
 create_chatroom(ParsedJson) ->
 
@@ -321,7 +361,7 @@ create_chatroom(ParsedJson) ->
     ChatRoomName = maps:get(chatroom_name, ParsedJson),
     Users        = maps:get(users, ParsedJson),
 
-    ChatRoomId   = random_id_generator(),
+    ChatRoomId   = list_to_binary(random_id_generator()),
 
     F = fun() ->
         Status = mnesia:write(#aurora_chatrooms{chatroom_id   = ChatRoomId,
@@ -333,6 +373,25 @@ create_chatroom(ParsedJson) ->
             _  -> error
         end
 
+    end,
+    mnesia:activity(transaction, F).
+
+find_chatroom(ChatRoomId) ->
+
+    F = fun() ->
+        case mnesia:read({aurora_chatrooms, ChatRoomId}) of
+            [#aurora_chatrooms{chatroom_name = ChatRoomName,
+                               room_users    = RoomUsers,
+                               admin_user    = AdminUser}] ->
+
+                #{chatroom_id   => ChatRoomId,
+                  chatroom_name => ChatRoomName,
+                  room_users    => RoomUsers,
+                  admin_user    => AdminUser};
+
+            _ ->
+                no_such_room
+        end
     end,
     mnesia:activity(transaction, F).
 
