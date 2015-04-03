@@ -4,10 +4,9 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 -export([start/0]).
 
--export([find_chatroom/1]).
-
 -record(aurora_users, {phone_number, username, session_token, rooms, current_ip, active_socket}).
 -record(aurora_chatrooms, {chatroom_id, chatroom_name, room_users, admin_user}).
+-record(aurora_message_backlog, {phone_number, messages}).
 % -record(aurora_backlog, {phone_number, message}).
 % -record(aurora_messages, {userID, message, chatRoomID, timestamp}).
 % -record(aurora_notes, {userID, message}).
@@ -33,6 +32,7 @@ handle_call({register, ParsedJson, Socket}, _From, State) ->
             case Status of
                 % return value from update_user mnesia database transaction
                 ok ->
+                    send_backlog(ParsedJson, Socket),
                     {reply, ok, State};
                 _ ->
                     {reply, error, State}
@@ -47,6 +47,7 @@ handle_call({register, ParsedJson, Socket}, _From, State) ->
                     {reply, error, State}
             end
     end;
+    
 
 handle_call({authorize_request, ParsedJson}, _From, State) ->
 
@@ -93,7 +94,7 @@ handle_cast({send_chat_message, ParsedJson, FromSocket}, State) ->
                 case UserNumber =/= FromPhoneNumber of 
                     true ->
                         User = find_user(UserNumber),
-                        send_message(User, ParsedJson, FromSocket);
+                        send_chat_message(User, ParsedJson, FromSocket);
                     false -> skip
                 end
             end,
@@ -108,34 +109,37 @@ handle_cast({send_chat_message, ParsedJson, FromSocket}, State) ->
 handle_cast({update_socket, ParsedJson, SocketToUpdate}, State) ->
 
     update_socket(ParsedJson, SocketToUpdate),
+    send_backlog(ParsedJson, SocketToUpdate),
     {noreply, State};
 
 handle_cast({create_chatroom, ParsedJson, FromSocket}, State) ->
 
+    FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
     Users = convert_string_list_to_binary(maps:get(users, ParsedJson)),
 
     ValidateResult = validate_users(Users),
 
     case ValidateResult of
 
-        {ok, users_validated, UserSockets} ->
+        {ok, users_validated, UserInfo} ->
     
             DatabaseResult = create_chatroom(ParsedJson),
             case DatabaseResult of
                 {ok, room_created, ChatRoomId, ChatRoomName, Users} ->
 
                     % no need to abtract out yet??
-                    gen_tcp:send(FromSocket, jsx:encode(#{
+                    send_client_message(FromSocket, FromPhoneNumber, 
+                    jsx:encode(#{
                         <<"status">>        => 1,
                         <<"chatroom_id">>   => ChatRoomId,
                         <<"type">>          => <<"CREATE_ROOM">>
                     })),
 
                     % send status to all users
-                    F = fun(Socket) ->
-                        send_chatroom_invitation(ChatRoomId, ChatRoomName, Users, Socket)
+                    F = fun(User) ->
+                        send_chatroom_invitation(ChatRoomId, ChatRoomName, Users, maps:get(active_socket, User), maps:get(phone_number, User))
                     end,
-                    lists:foreach(F, UserSockets);
+                    lists:foreach(F, UserInfo);
 
                 error ->
                     chat_server:status_reply(FromSocket, 3, <<"CREATE_ROOM">>)
@@ -185,7 +189,8 @@ async_find_room_and_respond(ParsedJson, FromSocket) ->
     ChatRoomId  = maps:get(chatroom_id, ParsedJson),
 
     case find_chatroom(ChatRoomId) of
-        #{chatroom_name := ChatRoomName, 
+        #{
+          chatroom_name := ChatRoomName, 
           room_users    := RoomUsers, 
           admin_user    := AdminUser} ->
 
@@ -200,15 +205,16 @@ async_find_room_and_respond(ParsedJson, FromSocket) ->
 
     end.
 
-send_message(UserFound, ParsedJson, FromSocket) ->
+send_chat_message(UserFound, ParsedJson, FromSocket) ->
 
     FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
     Message         = maps:get(message, ParsedJson),
     ChatRoomId      = maps:get(chatroom_id, ParsedJson),
 
-    ToSocket = maps:get(active_socket, UserFound),
+    ToSocket      = maps:get(active_socket, UserFound),
+    ToPhoneNumber = maps:get(phone_number, UserFound),
 
-    Status = gen_tcp:send(ToSocket, 
+    Status = send_client_message(ToSocket, ToPhoneNumber,
         jsx:encode(#{
         <<"from_phone_number">> => FromPhoneNumber,
         <<"chatroom_id">>       => ChatRoomId,
@@ -220,15 +226,15 @@ send_message(UserFound, ParsedJson, FromSocket) ->
         ok ->
             % message sent successfully
             chat_server:status_reply(FromSocket, 1, <<"TEXT">>, maps:get(phone_number, UserFound));
-        _ ->
+        error ->
             % socket closed
             chat_server:status_reply(FromSocket, 7, <<"TEXT">>)
     end.
 
 
-send_chatroom_invitation(ChatRoomId, ChatRoomName, Users, Socket) ->
+send_chatroom_invitation(ChatRoomId, ChatRoomName, Users, Socket, PhoneNumber) ->
 
-    Status = gen_tcp:send(Socket, 
+    send_client_message(Socket, PhoneNumber,
         jsx:encode(#{
             <<"chatroom_id">>   => ChatRoomId,
             <<"chatroom_name">> => ChatRoomName,
@@ -249,7 +255,8 @@ validate_users(Users) ->
             current_ip     := _IPaddress, 
             active_socket  := Socket} ->
 
-                Socket;
+                #{phone_number  => UserPhoneNumber,
+                  active_socket => Socket};
 
             no_such_user -> no_such_user
         end
@@ -263,6 +270,57 @@ validate_users(Users) ->
             error;
         false ->
             {ok, users_validated, UserSockets}
+    end.
+
+send_backlog(ParsedJson, Socket) ->
+
+    PhoneNumber = maps:get(from_phone_number, ParsedJson),
+    io:format("Sending backlog messages..~n",[]),
+    LeftoverMessages = [],
+
+    case find_backlog(PhoneNumber) of
+
+        undefined ->
+            io:format("There are no backlog messages.~n",[]),
+            no_backlog_messages;
+
+        no_such_user ->
+            error;
+
+        [] ->
+            io:format("There are no backlog messages.~n",[]),
+            no_backlog_messages;
+
+
+
+        Messages ->
+
+            F = fun(Message) ->
+                io:format("Backlog message:~n~p~n",[Message]),
+                Status = gen_tcp:send(Socket, Message),
+
+                case Status of
+                    ok ->
+                        great;
+                    _  ->
+                        lists:append(LeftoverMessages, [Message])
+                end
+
+            end,
+
+            lists:foreach(F, [Messages]),
+            update_backlog(PhoneNumber, LeftoverMessages)
+
+
+    end.
+
+send_client_message(Socket, PhoneNumber, Message) ->
+    Status = gen_tcp:send(Socket, Message),
+    case Status of
+        ok -> ok;
+        _  -> 
+            append_backlog(PhoneNumber, Message),
+            error
     end.
 
 %%%%%%%%%%%%%%%%%%%%
@@ -343,7 +401,8 @@ create_user(ParsedJson, Socket) ->
                                    username = UserName, 
                                    session_token = SessionToken,
                                    current_ip = IPaddress, 
-                                   active_socket = Socket})
+                                   active_socket = Socket}),
+        mnesia:write(#aurora_message_backlog{phone_number = PhoneNumber})
     end,
     mnesia:activity(transaction, F).
 
@@ -395,8 +454,44 @@ find_chatroom(ChatRoomId) ->
     end,
     mnesia:activity(transaction, F).
 
-% create_room(Name, RoomName) ->
+find_backlog(PhoneNumber) ->
     
+    F = fun() ->
+        case mnesia:read({aurora_message_backlog, PhoneNumber}) of
+            [#aurora_message_backlog{messages = Messages}] ->
+                Messages;
+            [] ->
+                no_such_user
+        end
+    end,
+    mnesia:activity(transaction, F).
+
+update_backlog(PhoneNumber, Messages) ->
+
+    F = fun() ->
+
+        [ExistingUser] = mnesia:wread({aurora_message_backlog, PhoneNumber}),
+        UpdatedUser = ExistingUser#aurora_message_backlog{messages = Messages},
+        mnesia:write(UpdatedUser)
+
+    end,
+    mnesia:activity(transaction, F).
+
+append_backlog(PhoneNumber, Message) ->
+
+    Backlog = find_backlog(PhoneNumber),
+
+    case Backlog of
+
+        undefined ->  update_backlog(PhoneNumber, [Message]);
+        no_such_user -> no_such_user;
+
+        Messages ->
+
+            AppendedMessages = lists:append(Messages, [Message]),
+            update_backlog(PhoneNumber, AppendedMessages)
+
+    end.
 
 % create_user_to_room(Name, RoomId)
 % leave_room(Name, RoomId)
@@ -428,38 +523,3 @@ convert_string_list_to_binary(List) ->
 handle_info(_Message, State) -> {noreply, State}.
 terminate(_Reason, _State) -> ok.
 code_change(_OldVersion, State, _Extra) -> {ok, State}.
-
-% handle_call(Message, _From, State) ->
-
-%     case Message of
-%         {connect, Name, Socket} ->
-%             case create_user(Name, Socket) of
-%                 ok ->
-%                     {reply, ok, State};
-%                 _ ->
-%                     {reply, error, State}
-%             end;
-
-%         {disconnect, Name} ->
-%             {reply, ok, State};
-
-%         _ ->
-%             {reply, error, State}
-
-%     end.
-
-% handle_cast({talk, OwnName, Socket, NameToFind, Message}, State) ->
-%     case find_user(NameToFind) of
-%         {PeerName, _Location, PeerSocket} ->
-%             % FlattenLocation = lists:flatten(io_lib:format("~p", [Location])),
-%             Response = gen_tcp:send(PeerSocket, OwnName ++ ": " ++ Message ++ "\n"),
-%             case Response of
-%                 ok ->
-%                     gen_tcp:send(Socket, "Message received by: " ++ NameToFind ++ "\n");
-%                 {error, _} ->
-%                     gen_tcp:send(Socket, "Could not send message because " ++ PeerName ++ " is offline.\n")
-%             end;
-%         no_such_user ->
-%             gen_tcp:send(Socket, "USER_NOT_FOUND: " ++ NameToFind)
-%     end,
-%     {noreply, State};

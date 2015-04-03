@@ -6,6 +6,7 @@
 
 -record(aurora_users, {phone_number, username, session_token, rooms, current_ip, active_socket}).
 -record(aurora_chatrooms, {chatroom_id, chatroom_name, room_users, admin_user}).
+-record(aurora_message_backlog, {phone_number, messages}).
 
 start(Port) ->
     mnesia:wait_for_tables([aurora_users], 5000),
@@ -21,6 +22,10 @@ install(Nodes) ->
                          {type, set}]),
     mnesia:create_table(aurora_chatrooms,
                         [{attributes, record_info(fields, aurora_chatrooms)},
+                         {disc_copies, Nodes},
+                         {type, set}]),
+    mnesia:create_table(aurora_message_backlog,
+                        [{attributes, record_info(fields, aurora_message_backlog)},
                          {disc_copies, Nodes},
                          {type, set}]).
 
@@ -140,7 +145,14 @@ get_message_type(ParsedJson) ->
 
 status_reply(Socket, Status) ->
     io:format("Status sent: ~p~n", [Status]),
+    % Message = 
     gen_tcp:send(Socket, jsx:encode(#{<<"status">> => Status})).
+
+    % case Status of
+    %     ok -> ok;
+    %     error ->
+    %         append_backlog(Status)
+    % end.
 
 status_reply(Socket, Status, Type) ->
     io:format("Status sent: ~p~n", [Status]),
