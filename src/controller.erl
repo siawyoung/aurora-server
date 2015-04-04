@@ -416,7 +416,7 @@ create_chatroom(ParsedJson) ->
 
     AdminUser    = maps:get(from_phone_number, ParsedJson),
     ChatRoomName = maps:get(chatroom_name, ParsedJson),
-    Users        = maps:get(users, ParsedJson),
+    Users        = handle_list(maps:get(users, ParsedJson)),
 
     ChatRoomId   = list_to_binary(random_id_generator()),
 
