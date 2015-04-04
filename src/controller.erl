@@ -115,9 +115,9 @@ handle_cast({update_socket, ParsedJson, SocketToUpdate}, State) ->
 handle_cast({create_chatroom, ParsedJson, FromSocket}, State) ->
 
     FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
-    Users = handle_list(maps:get(users, ParsedJson)),
+    RawUsers = handle_list(maps:get(users, ParsedJson)),
 
-    ValidateResult = validate_users(Users),
+    ValidateResult = validate_users(RawUsers),
 
     case ValidateResult of
 
