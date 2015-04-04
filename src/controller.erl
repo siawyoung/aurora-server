@@ -115,7 +115,7 @@ handle_cast({update_socket, ParsedJson, SocketToUpdate}, State) ->
 handle_cast({create_chatroom, ParsedJson, FromSocket}, State) ->
 
     FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
-    Users = convert_string_list_to_binary(maps:get(users, ParsedJson)),
+    Users = handle_list(maps:get(users, ParsedJson)),
 
     ValidateResult = validate_users(Users),
 
@@ -290,8 +290,6 @@ send_backlog(ParsedJson, Socket) ->
         [] ->
             io:format("There are no backlog messages.~n",[]),
             no_backlog_messages;
-
-
 
         Messages ->
 
@@ -505,13 +503,25 @@ random_id_generator() ->
     <<I:160/integer>> = crypto:hash(sha,term_to_binary({make_ref(), now()})), 
     erlang:integer_to_list(I, 16).
 
-convert_string_list_to_binary(List) ->
+handle_list(List) ->
+    ParsedList = case is_binary(List) of
+        true ->
+            jsx:decode(List);
+        false ->
+            List
+    end,
+    convert_list_items_to_binary(ParsedList).
+
+
+convert_list_items_to_binary(List) ->
     F = fun(Item) ->
-        case is_binary(Item) of
+        if 
+            is_list(Item) ->
+                list_to_binary(Item);
+            is_number(Item) ->
+                list_to_binary(integer_to_list(Item));
             true ->
-                Item;
-            false ->
-                list_to_binary(Item)
+                Item
         end
     end,
     lists:map(F, List).
