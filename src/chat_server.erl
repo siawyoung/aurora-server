@@ -7,7 +7,7 @@
 -record(aurora_users, {phone_number, username, session_token, rooms, current_ip, active_socket}).
 -record(aurora_chatrooms, {chatroom_id, chatroom_name, room_users, admin_user}).
 -record(aurora_message_backlog, {phone_number, messages}).
-% -record(aurora_chat_messages, {chatroom_id, from_phone_number, })
+-record(aurora_chat_messages, {chatroom_id, from_phone_number, message, chat_message_id}).
 
 start(Port) ->
     mnesia:wait_for_tables([aurora_users], 5000),
@@ -28,7 +28,11 @@ install(Nodes) ->
     mnesia:create_table(aurora_message_backlog,
                         [{attributes, record_info(fields, aurora_message_backlog)},
                          {disc_copies, Nodes},
-                         {type, set}]).
+                         {type, set}]),
+    mnesia:create_table(aurora_chat_messages,
+                        [{attributes, record_info(fields, aurora_chat_messages)},
+                         {disc_copies, Nodes},
+                         {type, bag}]).
 
 pre_connected_loop(Socket) ->
     case gen_tcp:recv(Socket, 0) of
@@ -109,7 +113,13 @@ connected_loop(Socket) ->
                                 <<"CREATE_ROOM">> ->
                                     io:format("CREATE_ROOM MESSAGE SENT~n",[]),
                                     gen_server:cast(controller, {create_chatroom, ParsedJson, Socket}),
+                                    connected_loop(Socket);
+
+                                <<"ROOM_INVITATION">> ->
+                                    io:format("ROOM INVITATION MESSAGE SENT~n", []),
+                                    gen_server:cast(controller, {room_invitation, ParsedJson, Socket}),
                                     connected_loop(Socket)
+
                             end
 
                     end

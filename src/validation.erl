@@ -73,6 +73,13 @@ validate_and_parse_request(RawData) ->
                 JsonWithCleanedList -> JsonWithCleanedList
               end;
 
+            <<"ROOM_INVITATION">> ->
+              case validate_chatroom_invitation_request(ParsedJson) of
+                valid_request   -> ParsedJson;
+                invalid_request -> {missing_fields, <<"ROOM_INVITATION">>}
+              end;
+
+
             _ -> wrong_message_type
           end
       end
@@ -118,6 +125,24 @@ validate_create_room_request(ParsedJson) ->
     false ->
         io:format("Message from validate_create_room_request: Valid payload~n", []),
         maps:put(users, handle_list(Users), ParsedJson) %% we replace the old users with a cleaned version
+  end.
+
+validate_chatroom_invitation_request(ParsedJson) ->
+
+  FromPhoneNumber = maps:get(from_phone_number, ParsedJson, missing_field),
+  ToPhoneNumber   = maps:get(from_phone_number, ParsedJson, missing_field),
+  ChatRoomId      = maps:get(chatroom_id, ParsedJson, missing_field),
+  SessionToken    = maps:get(session_token, ParsedJson, missing_field),
+
+  case ((ToPhoneNumber == missing_field) or (SessionToken == missing_field) or (FromPhoneNumber == missing_field) or (ChatRoomId == missing_field)) of
+
+    true ->
+        io:format("Message from validate_chatroom_invitation_request: Invalid payload~n", []),
+        invalid_request;
+
+    false ->
+        io:format("Message from validate_chatroom_invitation_request: Valid payload~n", []),
+        valid_request
   end.
 
 %%%%%%%%%%%%%%%%%%%%%
