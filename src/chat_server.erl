@@ -33,23 +33,20 @@ pre_connected_loop(Socket) ->
     case gen_tcp:recv(Socket, 0) of
 
         {ok, Data} ->
-            % server stdout
-            % Message = binary_to_list(Data),
-            ParsedJson = jsx:decode(Data, [{labels, atom}, return_maps]),
-            io:format("Message received by pre_connected_loop:~n~p~n",[ParsedJson]),
-            % MessageType = get_message_type(Data),
 
-            % case MessageType of
+            case validation:validate_and_parse_auth(Data) of
 
-                % <<"AUTH">> ->
+                invalid_auth_message ->
 
-            case validate_auth_message(ParsedJson) of
+                    status_reply(Socket, 2, <<"AUTH">>),
+                    pre_connected_loop(Socket);
 
-                valid_auth_message ->
+                ParsedJson ->
 
                     Status = register_user(ParsedJson, Socket),
 
                     case Status of
+
                         ok ->
                             status_reply(Socket, 1, <<"AUTH">>),
                             connected_loop(Socket);
@@ -57,19 +54,9 @@ pre_connected_loop(Socket) ->
                         error ->
                             status_reply(Socket, 3, <<"AUTH">>),
                             pre_connected_loop(Socket)
-                    end;
-
-                invalid_auth_message ->
-
-                    status_reply(Socket, 2, <<"AUTH">>),
-                    pre_connected_loop(Socket)
+                    end
 
             end;
-
-                % _ ->
-                    % status_reply(Socket, 7)
-
-            % end;
 
         {error, closed} ->
             ok
@@ -161,21 +148,6 @@ status_reply(Socket, Status, Type) ->
 status_reply(Socket, Status, Type, Message) ->
     io:format("Status sent: ~p~n", [Status]),
     gen_tcp:send(Socket, jsx:encode(#{<<"status">> => Status, <<"type">> => Type, <<"message">> => Message})).
-
-validate_auth_message(ParsedJson) ->
-    Type         = maps:get(type, ParsedJson, missing_field),
-    UserName     = maps:get(username, ParsedJson, missing_field),
-    SessionToken = maps:get(session_token, ParsedJson, missing_field),
-    PhoneNumber  = maps:get(from_phone_number, ParsedJson, missing_field),
-    
-    case ((Type =/= <<"AUTH">>) or (UserName == missing_field) or (SessionToken == missing_field) or (PhoneNumber == missing_field)) of
-        true ->
-            io:format("Message from validate_auth_message: Invalid auth message~n", []),
-            invalid_auth_message;
-        false ->
-            io:format("Message from validate_auth_message: Valid auth message~n", []),
-            valid_auth_message
-    end.
 
 validate_message(Type) ->
     case Type of
