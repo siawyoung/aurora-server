@@ -13,6 +13,7 @@ validate_and_parse_auth(RawData) ->
       true ->
 
         ParsedJson = jsx:decode(RawData, [{labels, atom}, return_maps]),
+        io:format("Validating the following auth message: ~p~n", [ParsedJson]),
 
         Type         = maps:get(type, ParsedJson, missing_field),
         UserName     = maps:get(username, ParsedJson, missing_field),
@@ -48,6 +49,7 @@ validate_and_parse_request(RawData) ->
     true ->
 
       ParsedJson = jsx:decode(RawData, [{labels, atom}, return_maps]),
+      io:format("Validating the following request: ~p~n", [ParsedJson]),
       MessageType = get_message_type(ParsedJson),
 
       case MessageType of
@@ -96,7 +98,7 @@ validate_text_request(ParsedJson) ->
         invalid_request;
 
     false ->
-        io:format("Message from validate_auth_message: Valid payload~n", []),
+        io:format("Message from validate_text_message: Valid payload~n", []),
         valid_request
   end.
 

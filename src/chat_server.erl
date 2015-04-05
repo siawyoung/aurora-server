@@ -133,12 +133,6 @@ status_reply(Socket, Status) ->
     io:format("Status sent: ~p~n", [Status]),
     gen_tcp:send(Socket, jsx:encode(#{<<"status">> => Status})).
 
-    % case Status of
-    %     ok -> ok;
-    %     error ->
-    %         append_backlog(Status)
-    % end.
-
 status_reply(Socket, Status, Type) ->
     io:format("Status sent: ~p~n", [Status]),
     gen_tcp:send(Socket, jsx:encode(#{<<"status">> => Status, <<"type">> => Type})).

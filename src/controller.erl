@@ -26,7 +26,7 @@ handle_call({register, ParsedJson, Socket}, _From, State) ->
 
         user_exists ->
             
-            Status = update_user(ParsedJson, Socket),
+            Status = update_user(full_update, ParsedJson, Socket),
             case Status of
                 % return value from update_user mnesia database transaction
                 ok ->
@@ -110,14 +110,14 @@ handle_cast({send_chat_message, ParsedJson, FromSocket}, State) ->
 
 handle_cast({update_socket, ParsedJson, SocketToUpdate}, State) ->
 
-    update_socket(ParsedJson, SocketToUpdate),
+    update_user(socket, ParsedJson, SocketToUpdate),
     send_backlog(ParsedJson, SocketToUpdate),
     {noreply, State};
 
 handle_cast({create_chatroom, ParsedJson, FromSocket}, State) ->
 
     FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
-    RawUsers = handle_list(maps:get(users, ParsedJson)),
+    RawUsers = maps:get(users, ParsedJson),
 
     ValidateResult = validate_users(RawUsers),
 
@@ -242,7 +242,20 @@ send_chatroom_invitation(ChatRoomId, ChatRoomName, Users, Socket, PhoneNumber) -
             <<"chatroom_name">> => ChatRoomName,
             <<"users">>         => Users,
             <<"type">>          => <<"ROOM_INVITATION">>
-        })).
+        })),
+    add_room_to_user(ChatRoomId, PhoneNumber).
+
+add_room_to_user(ChatRoomId, PhoneNumber) ->
+    User = find_user(PhoneNumber),
+    Rooms = maps:get(rooms, User),
+    case Rooms of
+        undefined -> 
+            update_user(rooms, PhoneNumber, [ChatRoomId]);
+
+        ExistingRooms ->
+            AppendedRooms = lists:append(ExistingRooms, [ChatRoomId]),
+            update_user(rooms, PhoneNumber, AppendedRooms)
+    end.
 
 validate_users(Users) ->
     
@@ -361,7 +374,7 @@ find_user(PhoneNumber) ->
     end,
     mnesia:activity(transaction, F).
 
-update_user(ParsedJson, Socket) ->
+update_user(full_update, ParsedJson, Socket) ->
     PhoneNumber  = maps:get(from_phone_number, ParsedJson),
     UserName     = maps:get(username, ParsedJson),
     SessionToken = maps:get(session_token, ParsedJson),
@@ -376,9 +389,9 @@ update_user(ParsedJson, Socket) ->
         mnesia:write(UpdatedUser)
         
     end,
-    mnesia:activity(transaction, F).
+    mnesia:activity(transaction, F);
 
-update_socket(ParsedJson, Socket) ->
+update_user(socket, ParsedJson, Socket) ->
     PhoneNumber  = maps:get(from_phone_number, ParsedJson),
     {ok, {IPaddress, _Port}} = inet:peername(Socket),
     F = fun() ->
@@ -387,6 +400,14 @@ update_socket(ParsedJson, Socket) ->
                                                 active_socket = Socket},
         mnesia:write(UpdatedUser)
         
+    end,
+    mnesia:activity(transaction, F);
+
+update_user(rooms, PhoneNumber, Rooms) ->
+    F = fun() ->
+        [ExistingUser] = mnesia:wread({aurora_users, PhoneNumber}),
+        UpdatedUser = ExistingUser#aurora_users{rooms = Rooms},
+        mnesia:write(UpdatedUser)
     end,
     mnesia:activity(transaction, F).
 
@@ -418,7 +439,7 @@ create_chatroom(ParsedJson) ->
 
     AdminUser    = maps:get(from_phone_number, ParsedJson),
     ChatRoomName = maps:get(chatroom_name, ParsedJson),
-    Users        = handle_list(maps:get(users, ParsedJson)),
+    Users        = maps:get(users, ParsedJson),
 
     ChatRoomId   = list_to_binary(random_id_generator()),
 
@@ -504,29 +525,6 @@ append_backlog(PhoneNumber, Message) ->
 random_id_generator() -> 
     <<I:160/integer>> = crypto:hash(sha,term_to_binary({make_ref(), now()})), 
     erlang:integer_to_list(I, 16).
-
-handle_list(List) ->
-    ParsedList = case is_binary(List) of
-        true ->
-            jsx:decode(List);
-        false ->
-            List
-    end,
-    convert_list_items_to_binary(ParsedList).
-
-
-convert_list_items_to_binary(List) ->
-    F = fun(Item) ->
-        if 
-            is_list(Item) ->
-                list_to_binary(Item);
-            is_number(Item) ->
-                list_to_binary(integer_to_list(Item));
-            true ->
-                Item
-        end
-    end,
-    lists:map(F, List).
 
 % trim_whitespace(Input) ->
 %    string:strip(Input, both, $\r).
