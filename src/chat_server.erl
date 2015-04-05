@@ -69,21 +69,36 @@ connected_loop(Socket) ->
 
         {ok, Data} ->
 
-            ParsedJson = jsx:decode(Data, [{labels, atom}, return_maps]),
-            io:format("Message received by connected_loop:~n~p~n",[ParsedJson]),
-            MessageType = get_message_type(ParsedJson),
+            case validation:validate_and_parse_request(Data) of
 
-            case validate_message(MessageType) of
+                invalid_json ->
+                    status_reply(Socket, 0),
+                    connected_loop(Socket);
 
-                valid ->
+                missing_fields ->
+                    status_reply(Socket, 2),
+                    connected_loop(Socket);
+
+                {missing_fields, MessageType} ->
+                    status_reply(Socket, 2, MessageType),
+                    connected_loop(Socket);
+
+                wrong_message_type ->
+                    status_reply(Socket, 6),
+                    connected_loop(Socket);
+
+                %% whatever type of message it was, it has been checked for correctness of payload so we can proceed safely from here onwards
+                %% We also parse the list
+                ParsedJson ->
 
                     AuthorizedStatus = call_authorize_request(ParsedJson),
+                    MessageType = maps:get(type, ParsedJson),
 
                     if 
                         AuthorizedStatus =/= authorized ->
                             
                             %% Session tokens don't match
-                            status_reply(Socket, 4),
+                            status_reply(Socket, 4, MessageType),
                             connected_loop(Socket);
 
                         true ->
@@ -106,11 +121,7 @@ connected_loop(Socket) ->
                                     connected_loop(Socket)
                             end
 
-                    end;
-
-                not_valid ->
-                    status_reply(Socket, 6),
-                    connected_loop(Socket)
+                    end
 
             end;
 
@@ -127,12 +138,8 @@ register_user(ParsedJson, Socket) ->
         _     -> error
     end.
 
-get_message_type(ParsedJson) ->
-    maps:get(type, ParsedJson, missing_type).
-
 status_reply(Socket, Status) ->
     io:format("Status sent: ~p~n", [Status]),
-    % Message = 
     gen_tcp:send(Socket, jsx:encode(#{<<"status">> => Status})).
 
     % case Status of
@@ -149,18 +156,10 @@ status_reply(Socket, Status, Type, Message) ->
     io:format("Status sent: ~p~n", [Status]),
     gen_tcp:send(Socket, jsx:encode(#{<<"status">> => Status, <<"type">> => Type, <<"message">> => Message})).
 
-validate_message(Type) ->
-    case Type of
-        <<"TEXT">>        -> valid;
-        <<"CREATE_ROOM">> -> valid;
-        _                 -> not_valid
-    end.
-
 cast_update_socket(ParsedJson, Socket) ->
     gen_server:cast(controller, {update_socket, ParsedJson, Socket}).
 
 call_authorize_request(ParsedJson) ->
-
     Status = gen_server:call(controller, {authorize_request, ParsedJson}),
     io:format("Message from authorize_request method: ~p~n", [Status]),
     case Status of
@@ -168,29 +167,3 @@ call_authorize_request(ParsedJson) ->
         no_such_user -> no_such_user;
         _            -> error
     end.
-
-
-% find(Name, Socket, NameToFind) ->
-%     gen_server:cast(controller, {find, Socket, NameToFind}),
-%     connected_loop(Name, Socket).
-
-% talk(OwnName, Socket, PeerName, Message) ->
-%     gen_server:cast(controller, {talk, OwnName, Socket, PeerName, Message}),
-%     connected_loop(OwnName, Socket).
-
-% clean(Data) ->
-%     string:strip(Data, both, $\n).
-
-% try_connection(Name, Socket) ->
-%     Response = gen_server:call(controller, {connect, Name, Socket}),
-%     case Response of
-%         ok ->
-%             gen_tcp:send(Socket, "TCP_CONNECTION_SUCCESS: You are now connected as " ++ Name ++ "\n"),
-%             % gen_server:cast(controller, {join, Name}),
-%             connected_loop(Name, Socket);
-
-%         % if the response isn't what we want, we keep looping
-%         _ ->
-%             gen_tcp:send(Socket, "TCP_CONNECTION_ERROR: Internal service error.\n"),
-%             ok
-%     end.
