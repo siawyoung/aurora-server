@@ -21,8 +21,6 @@ init([]) ->
 
 handle_call({register, ParsedJson, Socket}, _From, State) ->
     PhoneNumber  = maps:get(from_phone_number, ParsedJson),
-    % UserName     = maps:get(username, jsx:decode(Data, [{labels, atom}, return_maps])),
-    % SessionToken = maps:get(session_token, jsx:decode(Data, [{labels, atom}, return_maps])),
 
     case user_exists(PhoneNumber) of
 
@@ -32,9 +30,11 @@ handle_call({register, ParsedJson, Socket}, _From, State) ->
             case Status of
                 % return value from update_user mnesia database transaction
                 ok ->
+                    chat_server:status_reply(Socket, 1, <<"AUTH">>),
                     send_backlog(ParsedJson, Socket),
                     {reply, ok, State};
                 _ ->
+                    chat_server:status_reply(Socket, 3, <<"AUTH">>),
                     {reply, error, State}
             end;
 
@@ -42,8 +42,10 @@ handle_call({register, ParsedJson, Socket}, _From, State) ->
             Status = create_user(ParsedJson, Socket),
             case Status of
                 ok ->
+                    chat_server:status_reply(Socket, 1, <<"AUTH">>),
                     {reply, ok, State};
                 _ ->
+                    chat_server:status_reply(Socket, 3, <<"AUTH">>),
                     {reply, error, State}
             end
     end;

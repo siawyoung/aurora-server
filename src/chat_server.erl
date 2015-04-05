@@ -7,6 +7,7 @@
 -record(aurora_users, {phone_number, username, session_token, rooms, current_ip, active_socket}).
 -record(aurora_chatrooms, {chatroom_id, chatroom_name, room_users, admin_user}).
 -record(aurora_message_backlog, {phone_number, messages}).
+% -record(aurora_chat_messages, {chatroom_id, from_phone_number, })
 
 start(Port) ->
     mnesia:wait_for_tables([aurora_users], 5000),
@@ -37,25 +38,15 @@ pre_connected_loop(Socket) ->
             case validation:validate_and_parse_auth(Data) of
 
                 invalid_auth_message ->
-
                     status_reply(Socket, 2, <<"AUTH">>),
                     pre_connected_loop(Socket);
 
                 ParsedJson ->
-
                     Status = register_user(ParsedJson, Socket),
-
                     case Status of
-
-                        ok ->
-                            status_reply(Socket, 1, <<"AUTH">>),
-                            connected_loop(Socket);
-
-                        error ->
-                            status_reply(Socket, 3, <<"AUTH">>),
-                            pre_connected_loop(Socket)
+                        ok    -> connected_loop(Socket);
+                        error -> pre_connected_loop(Socket)
                     end
-
             end;
 
         {error, closed} ->
@@ -88,7 +79,7 @@ connected_loop(Socket) ->
                     connected_loop(Socket);
 
                 %% whatever type of message it was, it has been checked for correctness of payload so we can proceed safely from here onwards
-                %% We also parse the list
+                %% We also convert lists to the correct format
                 ParsedJson ->
 
                     AuthorizedStatus = call_authorize_request(ParsedJson),
