@@ -4,6 +4,8 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 -export([start/0]).
 
+-export([append_backlog/2]).
+
 -record(aurora_users, {phone_number, username, session_token, rooms, current_ip, active_socket}).
 -record(aurora_chatrooms, {chatroom_id, chatroom_name, room_users, admin_user}).
 -record(aurora_message_backlog, {phone_number, messages}).
@@ -29,11 +31,11 @@ handle_call({register, ParsedJson, Socket}, _From, State) ->
             case Status of
                 % return value from update_user mnesia database transaction
                 ok ->
-                    chat_server:status_reply(Socket, 1, <<"AUTH">>),
+                    messaging:send_status_queue(Socket, PhoneNumber, 1, <<"AUTH">>),
                     send_backlog(ParsedJson, Socket),
                     {reply, ok, State};
                 _ ->
-                    chat_server:status_reply(Socket, 3, <<"AUTH">>),
+                    messaging:send_status_queue(Socket, PhoneNumber, 3, <<"AUTH">>),
                     {reply, error, State}
             end;
 
@@ -41,10 +43,10 @@ handle_call({register, ParsedJson, Socket}, _From, State) ->
             Status = create_user(ParsedJson, Socket),
             case Status of
                 ok ->
-                    chat_server:status_reply(Socket, 1, <<"AUTH">>),
+                    messaging:send_status_queue(Socket, PhoneNumber, 1, <<"AUTH">>),
                     {reply, ok, State};
                 _ ->
-                    chat_server:status_reply(Socket, 3, <<"AUTH">>),
+                    messaging:send_status_queue(Socket, PhoneNumber, 3, <<"AUTH">>),
                     {reply, error, State}
             end
     end;
@@ -75,15 +77,17 @@ handle_call({authorize_request, ParsedJson}, _From, State) ->
 
     end.
 
-
-
 handle_cast({send_chat_message, ParsedJson, FromSocket}, State) ->
 
-    RoomInfo = async_find_room_and_respond(ParsedJson, FromSocket),
+    ChatRoomId = maps:get(chatroom_id, ParsedJson),
+    FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
 
+    RoomInfo = find_chatroom(ChatRoomId),
     case RoomInfo of
 
-        no_such_room -> error;
+        no_such_room -> 
+
+            messaging:send_status_queue(FromSocket, FromPhoneNumber, 5, <<"CREATE_ROOM">>, <<"No such room.">>);
 
         _ ->
     
@@ -134,7 +138,7 @@ handle_cast({create_chatroom, ParsedJson, FromSocket}, State) ->
                 {ok, room_created, ChatRoomId, ChatRoomName, Users} ->
 
                     % no need to abtract out yet??
-                    send_client_message(FromSocket, FromPhoneNumber, 
+                    messaging:send_message(FromSocket, FromPhoneNumber, 
                     jsx:encode(#{
                         <<"status">>        => 1,
                         <<"chatroom_id">>   => ChatRoomId,
@@ -148,11 +152,11 @@ handle_cast({create_chatroom, ParsedJson, FromSocket}, State) ->
                     lists:foreach(F, UserInfo);
 
                 error ->
-                    chat_server:status_reply(FromSocket, 3, <<"CREATE_ROOM">>, <<"Database transaction error">>)
+                    messaging:send_status_queue(FromSocket, FromPhoneNumber, 3, <<"CREATE_ROOM">>, <<"Database transaction error">>)
             end;
 
         error ->
-            chat_server:status_reply(FromSocket, 5, <<"CREATE_ROOM">>, <<"Some users are invalid">>)
+            messaging:send_status_queue(FromSocket, FromPhoneNumber, 5, <<"CREATE_ROOM">>, <<"Some users are invalid">>)
     end,
 
     {noreply, State};
@@ -169,9 +173,9 @@ handle_cast({room_invitation, ParsedJson, FromSocket}, State) ->
 
     if
         User == no_such_user ->
-            chat_server:status_reply(FromSocket, 5, <<"ROOM_INVITATION">>, <<"No such user">>);
+            messaging:send_status_queue(FromSocket, FromPhoneNumber, 5, <<"ROOM_INVITATION">>, <<"No such user">>);
         Room == no_such_room ->
-            chat_server:status_reply(FromSocket, 5, <<"ROOM_INVITATION">>, <<"No such room">>);
+            messaging:send_status_queue(FromSocket, FromPhoneNumber, 5, <<"ROOM_INVITATION">>, <<"No such room">>);
         true ->
 
             case check_if_user_admin(FromPhoneNumber, ChatRoomId) of
@@ -180,9 +184,9 @@ handle_cast({room_invitation, ParsedJson, FromSocket}, State) ->
                     ChatRoomName = maps:get(chatroom_name, Room),
                     UpdatedUsers = add_user_to_room(Room, ToPhoneNumber),
                     send_chatroom_invitation(ChatRoomId, ChatRoomName, UpdatedUsers, maps:get(active_socket, User), maps:get(phone_number, User)),
-                    chat_server:status_reply(FromSocket, 1, <<"ROOM_INVITATION">>, <<"User invited successfully">>);
+                    messaging:send_status_queue(FromSocket, FromPhoneNumber, 1, <<"ROOM_INVITATION">>, <<"User invited successfully">>);
                 user_not_admin ->
-                    chat_server:status_reply(FromSocket, 8, <<"ROOM_INVITATION">>, <<"User is not admin of the room">>)
+                    messaging:send_status_queue(FromSocket, FromPhoneNumber, 8, <<"ROOM_INVITATION">>, <<"User is not admin of the room">>)
             end
     end,
 
@@ -191,51 +195,6 @@ handle_cast({room_invitation, ParsedJson, FromSocket}, State) ->
 %%%%%%%%%%%%%%%%%%%%%
 %%% Main functions
 %%%%%%%%%%%%%%%%%%%%%
-
-async_find_user_and_respond(ParsedJson, FromSocket) ->
-
-    PhoneNumber  = maps:get(to_phone_number, ParsedJson),
-
-    case find_user(PhoneNumber) of
-        #{username     := UserName, 
-        session_token  := SessionToken, 
-        rooms          := Rooms, 
-        current_ip     := IPaddress, 
-        active_socket  := Socket} ->
-
-            #{username      => UserName, 
-              session_token => SessionToken,
-              rooms         => Rooms, 
-              current_ip    => IPaddress, 
-              active_socket => Socket};
-
-        _ ->
-
-            chat_server:status_reply(FromSocket, 5),
-            no_such_user
-
-    end.
-
-async_find_room_and_respond(ParsedJson, FromSocket) ->
-
-    ChatRoomId  = maps:get(chatroom_id, ParsedJson),
-
-    case find_chatroom(ChatRoomId) of
-        #{
-          chatroom_name := ChatRoomName, 
-          room_users    := RoomUsers, 
-          admin_user    := AdminUser} ->
-
-            #{chatroom_name => ChatRoomName, 
-              room_users    => RoomUsers, 
-              admin_user    => AdminUser};
-
-        _ ->
-
-            chat_server:status_reply(FromSocket, 5),
-            no_such_room
-
-    end.
 
 send_chat_message(UserFound, ParsedJson, MessageID, FromSocket) ->
 
@@ -246,7 +205,7 @@ send_chat_message(UserFound, ParsedJson, MessageID, FromSocket) ->
     ToSocket      = maps:get(active_socket, UserFound),
     ToPhoneNumber = maps:get(phone_number, UserFound),
 
-    Status = send_client_message(ToSocket, ToPhoneNumber,
+    Status = messaging:send_message(ToSocket, ToPhoneNumber,
         jsx:encode(#{
         <<"message_id">>        => MessageID,
         <<"from_phone_number">> => FromPhoneNumber,
@@ -258,16 +217,16 @@ send_chat_message(UserFound, ParsedJson, MessageID, FromSocket) ->
     case Status of
         ok ->
             % message sent successfully
-            chat_server:status_reply(FromSocket, 1, <<"TEXT">>, maps:get(phone_number, UserFound));
+            messaging:send_status_queue(FromSocket, FromPhoneNumber, 1, <<"TEXT">>, maps:get(phone_number, UserFound));
         error ->
             % socket closed
-            chat_server:status_reply(FromSocket, 7, <<"TEXT">>)
+            messaging:send_status_queue(FromSocket, FromPhoneNumber, 7, <<"TEXT">>, maps:get(phone_number, UserFound))
     end.
 
 
 send_chatroom_invitation(ChatRoomId, ChatRoomName, Users, Socket, PhoneNumber) ->
 
-    send_client_message(Socket, PhoneNumber,
+    messaging:send_message(Socket, PhoneNumber,
         jsx:encode(#{
             <<"chatroom_id">>   => ChatRoomId,
             <<"chatroom_name">> => ChatRoomName,
@@ -362,14 +321,14 @@ send_backlog(ParsedJson, Socket) ->
 
     end.
 
-send_client_message(Socket, PhoneNumber, Message) ->
-    Status = gen_tcp:send(Socket, Message),
-    case Status of
-        ok -> ok;
-        _  -> 
-            append_backlog(PhoneNumber, Message),
-            error
-    end.
+% send_client_message(Socket, PhoneNumber, Message) ->
+%     Status = gen_tcp:send(Socket, Message),
+%     case Status of
+%         ok -> ok;
+%         _  -> 
+%             append_backlog(PhoneNumber, Message),
+%             error
+%     end.
 
 check_if_user_admin(PhoneNumber, ChatRoomId) ->
 

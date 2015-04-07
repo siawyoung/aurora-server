@@ -1,8 +1,8 @@
 -module(validation).
 
--export([validate_and_parse_auth/1, validate_and_parse_request/1]).
+-export([validate_and_parse_auth/2, validate_and_parse_request/1]).
 
-validate_and_parse_auth(RawData) ->
+validate_and_parse_auth(Socket, RawData) ->
 
     case jsx:is_json(RawData) of
 
@@ -25,6 +25,7 @@ validate_and_parse_auth(RawData) ->
 
           true ->
               io:format("Message from validate_auth_message: Invalid auth message~n", []),
+              messaging:send_status(Socket, 2, <<"AUTH">>),
               invalid_auth_message;
 
           false ->
@@ -59,7 +60,7 @@ validate_and_parse_request(RawData) ->
 
           case Type of
 
-            <<"AUTH">> -> wrong_message_type;
+            <<"AUTH">> -> wrong_message_type; %% Not supposed to have AUTH messages here
             <<"TEXT">> ->
               case validate_text_request(ParsedJson) of
                 valid_request   -> ParsedJson;
@@ -79,8 +80,8 @@ validate_and_parse_request(RawData) ->
                 invalid_request -> {missing_fields, <<"ROOM_INVITATION">>}
               end;
 
-
             _ -> wrong_message_type
+            
           end
       end
 

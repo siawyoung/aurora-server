@@ -2,7 +2,7 @@
 
 -export([start/1, pre_connected_loop/1]).
 -export([install/1]).
--export([status_reply/2, status_reply/3, status_reply/4]).
+% -export([status_reply/2, status_reply/3, status_reply/4]).
 
 -record(aurora_users, {phone_number, username, session_token, rooms, current_ip, active_socket}).
 -record(aurora_chatrooms, {chatroom_id, chatroom_name, room_users, admin_user}).
@@ -39,14 +39,12 @@ pre_connected_loop(Socket) ->
 
         {ok, Data} ->
 
-            case validation:validate_and_parse_auth(Data) of
+            case validation:validate_and_parse_auth(Socket, Data) of
 
-                invalid_auth_message ->
-                    status_reply(Socket, 2, <<"AUTH">>),
-                    pre_connected_loop(Socket);
+                invalid_auth_message -> pre_connected_loop(Socket);
 
                 ParsedJson ->
-                    Status = register_user(ParsedJson, Socket),
+                    Status = gen_server:call(controller, {register, ParsedJson, Socket}),
                     case Status of
                         ok    -> connected_loop(Socket);
                         error -> pre_connected_loop(Socket)
@@ -57,8 +55,6 @@ pre_connected_loop(Socket) ->
             ok
     end.
 
-
-
 connected_loop(Socket) ->
     case gen_tcp:recv(Socket, 0) of
 
@@ -67,19 +63,22 @@ connected_loop(Socket) ->
             case validation:validate_and_parse_request(Data) of
 
                 invalid_json ->
-                    status_reply(Socket, 0),
+                    % status_reply(Socket, 0),
+                    messaging:send_status(Socket, 0),
                     connected_loop(Socket);
 
                 missing_fields ->
-                    status_reply(Socket, 2),
+                    messaging:send_status(Socket, 2),
                     connected_loop(Socket);
 
                 {missing_fields, MessageType} ->
-                    status_reply(Socket, 2, MessageType),
+                    % status_reply(Socket, 2, MessageType),
+                    messaging:send_status(Socket, 2, MessageType),
                     connected_loop(Socket);
 
                 wrong_message_type ->
-                    status_reply(Socket, 6),
+                    % status_reply(Socket, 6),
+                    messaging:send_status(Socket, 6),
                     connected_loop(Socket);
 
                 %% whatever type of message it was, it has been checked for correctness of payload so we can proceed safely from here onwards
@@ -88,12 +87,13 @@ connected_loop(Socket) ->
 
                     AuthorizedStatus = call_authorize_request(ParsedJson),
                     MessageType = maps:get(type, ParsedJson),
+                    PhoneNumber = maps:get(from_phone_number, ParsedJson),
 
                     if 
                         AuthorizedStatus =/= authorized ->
                             
                             %% Session tokens don't match
-                            status_reply(Socket, 4, MessageType),
+                            messaging:send_status_queue(Socket, PhoneNumber, 4, MessageType),
                             connected_loop(Socket);
 
                         true ->
@@ -131,25 +131,17 @@ connected_loop(Socket) ->
 
     end.
 
-register_user(ParsedJson, Socket) ->
-    Status = gen_server:call(controller, {register, ParsedJson, Socket}),
-    io:format("Message sent by register_user method: ~p~n", [Status]),
-    case Status of
-        ok    -> ok;
-        _     -> error
-    end.
+% status_reply(Socket, Status) ->
+%     io:format("Status sent: ~p~n", [Status]),
+%     gen_tcp:send(Socket, jsx:encode(#{<<"status">> => Status})).
 
-status_reply(Socket, Status) ->
-    io:format("Status sent: ~p~n", [Status]),
-    gen_tcp:send(Socket, jsx:encode(#{<<"status">> => Status})).
+% status_reply(Socket, Status, Type) ->
+%     io:format("Status sent: ~p~n", [Status]),
+%     gen_tcp:send(Socket, jsx:encode(#{<<"status">> => Status, <<"type">> => Type})).
 
-status_reply(Socket, Status, Type) ->
-    io:format("Status sent: ~p~n", [Status]),
-    gen_tcp:send(Socket, jsx:encode(#{<<"status">> => Status, <<"type">> => Type})).
-
-status_reply(Socket, Status, Type, Message) ->
-    io:format("Status sent: ~p~n", [Status]),
-    gen_tcp:send(Socket, jsx:encode(#{<<"status">> => Status, <<"type">> => Type, <<"message">> => Message})).
+% status_reply(Socket, Status, Type, Message) ->
+%     io:format("Status sent: ~p~n", [Status]),
+%     gen_tcp:send(Socket, jsx:encode(#{<<"status">> => Status, <<"type">> => Type, <<"message">> => Message})).
 
 cast_update_socket(ParsedJson, Socket) ->
     gen_server:cast(controller, {update_socket, ParsedJson, Socket}).
