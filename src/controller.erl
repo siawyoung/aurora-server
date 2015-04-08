@@ -9,7 +9,7 @@
 -record(aurora_users, {phone_number, username, session_token, rooms, current_ip, active_socket}).
 -record(aurora_chatrooms, {chatroom_id, chatroom_name, room_users, admin_user}).
 -record(aurora_message_backlog, {phone_number, messages}).
--record(aurora_chat_messages, {chatroom_id, from_phone_number, message, chat_message_id}).
+-record(aurora_chat_messages, {chatroom_id, from_phone_number, timestamp, message, chat_message_id}).
 % -record(aurora_notes, {userID, message}).
 
 start() ->
@@ -87,7 +87,7 @@ handle_cast({send_chat_message, ParsedJson, FromSocket}, State) ->
 
         no_such_room -> 
 
-            messaging:send_status_queue(FromSocket, FromPhoneNumber, 5, <<"CREATE_ROOM">>, <<"No such room.">>);
+            messaging:send_status_queue(FromSocket, FromPhoneNumber, 5, <<"TEXT">>, <<"No such room.">>);
 
         _ ->
     
@@ -201,9 +201,9 @@ send_chat_message(UserFound, ParsedJson, MessageID, FromSocket) ->
     FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
     Message         = maps:get(message, ParsedJson),
     ChatRoomId      = maps:get(chatroom_id, ParsedJson),
-
-    ToSocket      = maps:get(active_socket, UserFound),
-    ToPhoneNumber = maps:get(phone_number, UserFound),
+    TimeStamp       = maps:get(timestamp, ParsedJson),
+    ToSocket        = maps:get(active_socket, UserFound),
+    ToPhoneNumber   = maps:get(phone_number, UserFound),
 
     Status = messaging:send_message(ToSocket, ToPhoneNumber,
         jsx:encode(#{
@@ -211,16 +211,17 @@ send_chat_message(UserFound, ParsedJson, MessageID, FromSocket) ->
         <<"from_phone_number">> => FromPhoneNumber,
         <<"chatroom_id">>       => ChatRoomId,
         <<"message">>           => Message,
+        <<"timestamp">>         => TimeStamp,
         <<"type">>              => <<"TEXT_RECEIVED">>
         })),
 
     case Status of
         ok ->
             % message sent successfully
-            messaging:send_status_queue(FromSocket, FromPhoneNumber, 1, <<"TEXT">>, maps:get(phone_number, UserFound));
+            messaging:send_status_queue(FromSocket, FromPhoneNumber, 1, <<"TEXT">>, #{<<"message_id">> => MessageID, <<"to_phone_number">> => ToPhoneNumber});
         error ->
             % socket closed
-            messaging:send_status_queue(FromSocket, FromPhoneNumber, 7, <<"TEXT">>, maps:get(phone_number, UserFound))
+            messaging:send_status_queue(FromSocket, FromPhoneNumber, 7, <<"TEXT">>, #{<<"message_id">> => MessageID, <<"to_phone_number">> => ToPhoneNumber})
     end.
 
 
@@ -529,12 +530,14 @@ create_chat_message(ParsedJson) ->
     ChatRoomId = maps:get(chatroom_id, ParsedJson),
     FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
     Message = maps:get(message, ParsedJson),
+    TimeStamp = maps:get(timestamp, ParsedJson),
     ChatMessageID = timestamp_now(),
 
     F = fun() ->
         Status = mnesia:write(#aurora_chat_messages{chatroom_id       = ChatRoomId,
                                                     from_phone_number = FromPhoneNumber,
                                                     message           = Message,
+                                                    timestamp         = TimeStamp,
                                                     chat_message_id   = ChatMessageID}),
         case Status of
             ok -> {ok, chat_message_created, ChatMessageID};

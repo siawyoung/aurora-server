@@ -7,7 +7,7 @@
 -record(aurora_users, {phone_number, username, session_token, rooms, current_ip, active_socket}).
 -record(aurora_chatrooms, {chatroom_id, chatroom_name, room_users, admin_user}).
 -record(aurora_message_backlog, {phone_number, messages}).
--record(aurora_chat_messages, {chatroom_id, from_phone_number, message, chat_message_id}).
+-record(aurora_chat_messages, {chatroom_id, from_phone_number, timestamp, message, chat_message_id}).
 
 start(Port) ->
     mnesia:wait_for_tables([aurora_users], 5000),
