@@ -121,6 +121,11 @@ connected_loop(Socket) ->
                                 <<"LEAVE_ROOM">> ->
                                     io:format("LEAVE ROOM MESSAGE SENT~n", []),
                                     gen_server:cast(controller, {leave_room, ParsedJson, Socket}),
+                                    connected_loop(Socket);
+
+                                <<"TRANSFER_ADMIN">> ->
+                                    io:format("TRASNFER ADMIN MESSAGE SENT~n", []),
+                                    gen_server:cast(controller, {transfer_admin, ParsedJson, Socket}),
                                     connected_loop(Socket)
                             end
 

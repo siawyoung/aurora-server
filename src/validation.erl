@@ -85,6 +85,12 @@ validate_and_parse_request(RawData) ->
                 invalid_request -> {missing_fields, <<"LEAVE_ROOM">>}
               end;
 
+            <<"TRANSFER_ADMIN">> ->
+              case validate_transfer_admin_request(ParsedJson) of
+                valid_request   -> ParsedJson;
+                invalid_request -> {missing_fields, <<"TRANSFER_ADMIN">>}
+              end;
+
             _ -> wrong_message_type
             
           end
@@ -116,9 +122,8 @@ validate_create_room_request(ParsedJson) ->
   ChatRoomName       = maps:get(chatroom_name, ParsedJson, missing_field),
   FromPhoneNumber    = maps:get(from_phone_number, ParsedJson, missing_field),
   SessionToken       = maps:get(session_token, ParsedJson, missing_field),
-  TimeStamp          = maps:get(timestamp, ParsedJson, missing_field),
   Users              = maps:get(users, ParsedJson, missing_field),
-  case check_missing_or_null([ChatRoomName, SessionToken, FromPhoneNumber, TimeStamp, Users]) of
+  case check_missing_or_null([ChatRoomName, SessionToken, FromPhoneNumber, Users]) of
     true ->
         io:format("Message from validate_create_room_request: Invalid payload~n", []),
         invalid_request;
@@ -153,6 +158,11 @@ validate_leave_room_request(ParsedJson) ->
         io:format("Message from validate_leave_room_request: Valid payload~n", []),
         valid_request
   end.
+
+% because the payload requirements are exactly the same (for now)
+validate_transfer_admin_request(ParsedJson) ->
+  validate_chatroom_invitation_request(ParsedJson).
+
 
 %%%%%%%%%%%%%%%%%%%%%
 % AUX

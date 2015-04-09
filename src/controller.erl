@@ -227,6 +227,50 @@ handle_cast({leave_room, ParsedJson, FromSocket}, State) ->
                     end
             end
     end,
+    {noreply, State};
+
+handle_cast({transfer_admin, ParsedJson, FromSocket}, State) ->
+
+    FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
+    ToPhoneNumber   = maps:get(to_phone_number, ParsedJson),
+    ChatRoomId      = maps:get(chatroom_id, ParsedJson),
+
+    NewAdminUser = find_user(ToPhoneNumber),
+    FoundRoom    = find_chatroom(ChatRoomId),
+
+    if 
+        NewAdminUser == no_such_user ->
+            messaging:send_status_queue(FromSocket, FromPhoneNumber, 5, <<"TRANSFER_ADMIN">>, <<"No such user">>);
+
+        FoundRoom == no_such_room ->
+            messaging:send_status_queue(FromSocket, FromPhoneNumber, 5, <<"TRANSFER_ADMIN">>, <<"No such room">>);
+
+        true ->
+            case check_if_user_in_room(FoundRoom, FromPhoneNumber) and check_if_user_in_room(FoundRoom, ToPhoneNumber) of
+                false ->
+                    messaging:send_status_queue(FromSocket, FromPhoneNumber, 5, <<"TRANSFER_ADMIN">>, <<"User is not a member of the chatroom.">>);
+                true ->
+                    case check_if_user_admin(FromPhoneNumber, ChatRoomId) of
+
+                    user_not_admin ->
+                        messaging:send_status_queue(FromSocket, FromPhoneNumber, 8, <<"TRANSFER_ADMIN">>, <<"User is not admin of the room">>);
+                    user_is_admin -> 
+                        update_chatroom(change_admin, ChatRoomId, ToPhoneNumber),
+                        
+                        messaging:send_status_queue(FromSocket, FromPhoneNumber, 1, <<"TRANSFER_ADMIN">>, #{<<"chatroom_id">> => ChatRoomId}),
+                        
+                        messaging:send_message(maps:get(active_socket, NewAdminUser), ToPhoneNumber, 
+                            jsx:encode(#{
+                            <<"chatroom_id">> => ChatRoomId,
+                            <<"type">> => <<"NEW_ADMIN">>
+                        }))
+
+                    end
+                    
+            end
+
+    end,
+
     {noreply, State}.
 
 %%%%%%%%%%%%%%%%%%%%%
@@ -546,6 +590,14 @@ update_chatroom(change_room_users, ChatRoomId, Users) ->
     F = fun() ->
         [ExistingRoom] = mnesia:wread({aurora_chatrooms, ChatRoomId}),
         UpdatedRoom = ExistingRoom#aurora_chatrooms{room_users = Users},
+        mnesia:write(UpdatedRoom)
+    end,
+    mnesia:activity(transaction, F);
+
+update_chatroom(change_admin, ChatRoomId, NewAdmin) ->
+    F = fun() ->
+        [ExistingRoom] = mnesia:wread({aurora_chatrooms, ChatRoomId}),
+        UpdatedRoom = ExistingRoom#aurora_chatrooms{admin_user = NewAdmin},
         mnesia:write(UpdatedRoom)
     end,
     mnesia:activity(transaction, F).
