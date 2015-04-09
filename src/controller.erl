@@ -215,9 +215,16 @@ handle_cast({leave_room, ParsedJson, FromSocket}, State) ->
                 false ->
                     messaging:send_status_queue(FromSocket, FromPhoneNumber, 5, <<"LEAVE_ROOM">>, <<"User is not a member of the chatroom.">>);
                 true ->
-                    remove_room_from_user(ChatRoomId, FromPhoneNumber),
-                    remove_user_from_room(Room, FromPhoneNumber),
-                    messaging:send_status_queue(FromSocket, FromPhoneNumber, 1, <<"LEAVE_ROOM">>, #{<<"chatroom_id">> => ChatRoomId})
+                    % admin cannot leave the room until they transfer admin rights
+                    case check_if_user_admin(FromPhoneNumber, ChatRoomId) of
+
+                    user_not_admin ->
+                        remove_room_from_user(ChatRoomId, FromPhoneNumber),
+                        remove_user_from_room(Room, FromPhoneNumber),
+                        messaging:send_status_queue(FromSocket, FromPhoneNumber, 1, <<"LEAVE_ROOM">>, #{<<"chatroom_id">> => ChatRoomId});
+                    user_is_admin -> 
+                        messaging:send_status_queue(FromSocket, FromPhoneNumber, 8, <<"ROOM_INVITATION">>, <<"User is the admin of the room. Admins cannot leave the room until they transfer admin rights.">>)
+                    end
             end
     end,
     {noreply, State}.
