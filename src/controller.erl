@@ -120,7 +120,6 @@ handle_cast({send_chat_message, ParsedJson, FromSocket}, State) ->
                 end
 
     end,
-    
     {noreply, State};
 
 % update_socket shouldn't respond, even if it fails
@@ -167,14 +166,13 @@ handle_cast({create_chatroom, ParsedJson, FromSocket}, State) ->
         error ->
             messaging:send_status_queue(FromSocket, FromPhoneNumber, 5, <<"CREATE_ROOM">>, <<"Some users are invalid">>)
     end,
-
     {noreply, State};
 
 handle_cast({room_invitation, ParsedJson, FromSocket}, State) ->
     
     FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
-    ToPhoneNumber = maps:get(to_phone_number, ParsedJson),
-    ChatRoomId = maps:get(chatroom_id, ParsedJson),
+    ToPhoneNumber   = maps:get(to_phone_number, ParsedJson),
+    ChatRoomId      = maps:get(chatroom_id, ParsedJson),
 
 
     User = find_user(ToPhoneNumber),
@@ -198,7 +196,30 @@ handle_cast({room_invitation, ParsedJson, FromSocket}, State) ->
                     messaging:send_status_queue(FromSocket, FromPhoneNumber, 8, <<"ROOM_INVITATION">>, <<"User is not admin of the room">>)
             end
     end,
+    {noreply, State};
 
+handle_cast({leave_room, ParsedJson, FromSocket}, State) ->
+
+    FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
+    ChatRoomId      = maps:get(chatroom_id, ParsedJson),
+
+    Room = find_chatroom(ChatRoomId),
+
+    case Room of
+        no_such_room ->
+            messaging:send_status_queue(FromSocket, FromPhoneNumber, 5, <<"LEAVE_ROOM">>, <<"No such room">>);
+        FoundRoom ->
+            % check if user in room and vice versa
+            case check_if_user_in_room(FoundRoom, FromPhoneNumber) of
+
+                false ->
+                    messaging:send_status_queue(FromSocket, FromPhoneNumber, 5, <<"LEAVE_ROOM">>, <<"User is not a member of the chatroom.">>);
+                true ->
+                    remove_room_from_user(ChatRoomId, FromPhoneNumber),
+                    remove_user_from_room(Room, FromPhoneNumber),
+                    messaging:send_status_queue(FromSocket, FromPhoneNumber, 1, <<"LEAVE_ROOM">>, #{<<"chatroom_id">> => ChatRoomId})
+            end
+    end,
     {noreply, State}.
 
 %%%%%%%%%%%%%%%%%%%%%
@@ -245,6 +266,11 @@ send_chatroom_invitation(ChatRoomId, ChatRoomName, Users, Socket, PhoneNumber) -
         })),
     add_room_to_user(ChatRoomId, PhoneNumber).
 
+%% may need to write another version for just ChatRoomID
+check_if_user_in_room(Room, PhoneNumber) ->
+    User = find_user(PhoneNumber),
+    lists:member(maps:get(chatroom_id, Room), maps:get(rooms, User)) and lists:member(PhoneNumber, maps:get(room_users, Room)).
+    
 add_room_to_user(ChatRoomId, PhoneNumber) ->
     User = find_user(PhoneNumber),
     Rooms = maps:get(rooms, User),
@@ -257,9 +283,20 @@ add_room_to_user(ChatRoomId, PhoneNumber) ->
             update_user(rooms, PhoneNumber, AppendedRooms)
     end.
 
+remove_room_from_user(ChatRoomId, PhoneNumber) ->
+    User = find_user(PhoneNumber),
+    Rooms = maps:get(rooms, User),
+    UpdatedRooms = lists:delete(ChatRoomId, Rooms),
+    update_user(rooms, PhoneNumber, UpdatedRooms).
+
 add_user_to_room(Room, PhoneNumber) ->
     AppendedUsers = lists:append(maps:get(room_users, Room), [PhoneNumber]),
-    update_chatroom(add_user, maps:get(chatroom_id, Room), AppendedUsers).
+    update_chatroom(change_room_users, maps:get(chatroom_id, Room), AppendedUsers).
+
+
+remove_user_from_room(Room, PhoneNumber) ->
+    UpdatedUsers = lists:delete(PhoneNumber, maps:get(room_users, Room)),
+    update_chatroom(change_room_users, maps:get(chatroom_id, Room), UpdatedUsers).
 
 validate_users(Users) ->
     
@@ -350,16 +387,6 @@ chat_message_delivery_receipt(ToPhoneNumber, Message) ->
         _ ->
             nothing_happens
     end.
-
-
-% send_client_message(Socket, PhoneNumber, Message) ->
-%     Status = gen_tcp:send(Socket, Message),
-%     case Status of
-%         ok -> ok;
-%         _  -> 
-%             append_backlog(PhoneNumber, Message),
-%             error
-%     end.
 
 check_if_user_admin(PhoneNumber, ChatRoomId) ->
 
@@ -508,7 +535,7 @@ find_chatroom(ChatRoomId) ->
     end,
     mnesia:activity(transaction, F).
 
-update_chatroom(add_user, ChatRoomId, Users) ->
+update_chatroom(change_room_users, ChatRoomId, Users) ->
     F = fun() ->
         [ExistingRoom] = mnesia:wread({aurora_chatrooms, ChatRoomId}),
         UpdatedRoom = ExistingRoom#aurora_chatrooms{room_users = Users},

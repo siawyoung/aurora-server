@@ -72,12 +72,10 @@ connected_loop(Socket) ->
                     connected_loop(Socket);
 
                 {missing_fields, MessageType} ->
-                    % status_reply(Socket, 2, MessageType),
                     messaging:send_status(Socket, 2, MessageType),
                     connected_loop(Socket);
 
                 wrong_message_type ->
-                    % status_reply(Socket, 6),
                     messaging:send_status(Socket, 6),
                     connected_loop(Socket);
 
@@ -118,8 +116,12 @@ connected_loop(Socket) ->
                                 <<"ROOM_INVITATION">> ->
                                     io:format("ROOM INVITATION MESSAGE SENT~n", []),
                                     gen_server:cast(controller, {room_invitation, ParsedJson, Socket}),
-                                    connected_loop(Socket)
+                                    connected_loop(Socket);
 
+                                <<"LEAVE_ROOM">> ->
+                                    io:format("LEAVE ROOM MESSAGE SENT~n", []),
+                                    gen_server:cast(controller, {leave_room, ParsedJson, Socket}),
+                                    connected_loop(Socket)
                             end
 
                     end
