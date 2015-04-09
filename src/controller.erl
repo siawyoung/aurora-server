@@ -93,23 +93,32 @@ handle_cast({send_chat_message, ParsedJson, FromSocket}, State) ->
     
             UserNumbersFound = maps:get(room_users, RoomInfo),
 
-            % write the message to the database
-            % note that this chat message is not the same as the message backlog queue system
-            case create_chat_message(ParsedJson) of
+            case lists:member(FromPhoneNumber, UserNumbersFound) of
 
-                {ok, chat_message_created, ChatMessageID} ->
+                true ->
 
-                    F = fun(UserNumber) ->
-                        User = find_user(UserNumber),
-                        send_chat_message(User, ParsedJson, ChatMessageID, FromSocket)
-                    end,
+                    % write the message to the database
+                    % note that this chat message is not the same as the message backlog queue system
+                    case create_chat_message(ParsedJson) of
 
-                    lists:foreach(F, UserNumbersFound);
+                        {ok, chat_message_created, ChatMessageID} ->
 
-                chat_message_error ->
-                    error
+                            F = fun(UserNumber) ->
+                                User = find_user(UserNumber),
+                                send_chat_message(User, ParsedJson, ChatMessageID, FromSocket)
+                            end,
 
-            end
+                            lists:foreach(F, UserNumbersFound);
+
+                        chat_message_error ->
+                            error
+
+                    end;
+
+                false ->
+                    messaging:send_status_queue(FromSocket, FromPhoneNumber, 5, <<"TEXT">>, <<"User does not belong in the room.">>)
+                end
+
     end,
     
     {noreply, State};
