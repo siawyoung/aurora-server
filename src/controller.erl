@@ -489,30 +489,50 @@ update_user(full_update, ParsedJson, Socket) ->
     PhoneNumber  = maps:get(from_phone_number, ParsedJson),
     UserName     = maps:get(username, ParsedJson),
     SessionToken = maps:get(session_token, ParsedJson),
-    {ok, {IPaddress, _Port}} = inet:peername(Socket),
 
-    F = fun() ->
-        [ExistingUser] = mnesia:wread({aurora_users, PhoneNumber}),
-        UpdatedUser = ExistingUser#aurora_users{username      = UserName, 
-                                                session_token = SessionToken,
-                                                current_ip    = IPaddress,
-                                                active_socket = Socket},
-        mnesia:write(UpdatedUser)
-        
-    end,
-    mnesia:activity(transaction, F);
+    case inet:peername(Socket) of
+
+        {ok, {IPaddress, _Port}} ->
+
+            F = fun() ->
+                [ExistingUser] = mnesia:wread({aurora_users, PhoneNumber}),
+                UpdatedUser = ExistingUser#aurora_users{username      = UserName, 
+                                                        session_token = SessionToken,
+                                                        current_ip    = IPaddress,
+                                                        active_socket = Socket},
+                mnesia:write(UpdatedUser)
+                
+            end,
+            mnesia:activity(transaction, F);
+
+        _ ->
+
+            socket_error
+
+    end;
+
 
 update_user(socket, ParsedJson, Socket) ->
     PhoneNumber  = maps:get(from_phone_number, ParsedJson),
-    {ok, {IPaddress, _Port}} = inet:peername(Socket),
-    F = fun() ->
-        [ExistingUser] = mnesia:wread({aurora_users, PhoneNumber}),
-        UpdatedUser = ExistingUser#aurora_users{current_ip    = IPaddress,
-                                                active_socket = Socket},
-        mnesia:write(UpdatedUser)
-        
-    end,
-    mnesia:activity(transaction, F);
+
+    case inet:peername(Socket) of
+
+        {ok, {IPaddress, _Port}} ->
+
+            F = fun() ->
+                [ExistingUser] = mnesia:wread({aurora_users, PhoneNumber}),
+                UpdatedUser = ExistingUser#aurora_users{current_ip    = IPaddress,
+                                                        active_socket = Socket},
+                mnesia:write(UpdatedUser)
+                
+            end,
+            mnesia:activity(transaction, F);
+
+        _ ->
+
+            socket_error
+
+    end;
 
 update_user(rooms, PhoneNumber, Rooms) ->
     F = fun() ->
@@ -526,17 +546,26 @@ create_user(ParsedJson, Socket) ->
     PhoneNumber  = maps:get(from_phone_number, ParsedJson),
     UserName     = maps:get(username, ParsedJson),
     SessionToken = maps:get(session_token, ParsedJson),
-    {ok, {IPaddress, _Port}} = inet:peername(Socket),
 
-    F = fun() ->
-        mnesia:write(#aurora_users{phone_number = PhoneNumber, 
-                                   username = UserName, 
-                                   session_token = SessionToken,
-                                   current_ip = IPaddress, 
-                                   active_socket = Socket}),
-        mnesia:write(#aurora_message_backlog{phone_number = PhoneNumber})
-    end,
-    mnesia:activity(transaction, F).
+    case inet:peername(Socket) of
+
+        {ok, {IPaddress, _Port}} ->
+
+            F = fun() ->
+                mnesia:write(#aurora_users{phone_number = PhoneNumber, 
+                                           username = UserName, 
+                                           session_token = SessionToken,
+                                           current_ip = IPaddress, 
+                                           active_socket = Socket}),
+                mnesia:write(#aurora_message_backlog{phone_number = PhoneNumber})
+            end,
+            mnesia:activity(transaction, F);
+
+        _ ->
+
+            socket_error
+
+    end.
 
 % delete_user(ParsedJson) ->
 %     PhoneNumber  = maps:get(from_phone_number, ParsedJson),

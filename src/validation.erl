@@ -14,13 +14,9 @@ validate_and_parse_auth(Socket, RawData) ->
 
         ParsedJson = jsx:decode(RawData, [{labels, atom}, return_maps]),
         io:format("Validating the following auth message: ~p~n", [ParsedJson]),
+        Type = maps:get(type, ParsedJson, missing_field),
 
-        Type         = maps:get(type, ParsedJson, missing_field),
-        UserName     = maps:get(username, ParsedJson, missing_field),
-        SessionToken = maps:get(session_token, ParsedJson, missing_field),
-        PhoneNumber  = maps:get(from_phone_number, ParsedJson, missing_field),
-
-        case ((Type =/= <<"AUTH">>) or check_missing_or_null([UserName, SessionToken, PhoneNumber])) of
+        case ((Type =/= <<"AUTH">>) or validate_fields([username, session_token, from_phone_number], ParsedJson)) of
 
           true ->
               io:format("Message from validate_auth_message: Invalid auth message~n", []),
@@ -104,12 +100,8 @@ validate_and_parse_request(RawData) ->
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 validate_text_request(ParsedJson) ->
-  ChatRoomId       = maps:get(chatroom_id, ParsedJson, missing_field),
-  FromPhoneNumber  = maps:get(from_phone_number, ParsedJson, missing_field),
-  Message          = maps:get(message, ParsedJson, missing_field),
-  SessionToken     = maps:get(session_token, ParsedJson, missing_field),
-  TimeStamp        = maps:get(timestamp, ParsedJson, missing_field),
-  case check_missing_or_null([ChatRoomId, SessionToken, FromPhoneNumber, TimeStamp, Message]) of
+  
+  case validate_fields([chatroom_id, session_token, from_phone_number, timestamp, message], ParsedJson) of
     true ->
         io:format("Message from validate_text_request: Invalid payload~n", []),
         invalid_request;
@@ -119,25 +111,20 @@ validate_text_request(ParsedJson) ->
   end.
 
 validate_create_room_request(ParsedJson) ->
-  ChatRoomName       = maps:get(chatroom_name, ParsedJson, missing_field),
-  FromPhoneNumber    = maps:get(from_phone_number, ParsedJson, missing_field),
-  SessionToken       = maps:get(session_token, ParsedJson, missing_field),
-  Users              = maps:get(users, ParsedJson, missing_field),
-  case check_missing_or_null([ChatRoomName, SessionToken, FromPhoneNumber, Users]) of
+  
+  case validate_fields([chatroom_name, session_token, from_phone_number, users], ParsedJson) of
     true ->
         io:format("Message from validate_create_room_request: Invalid payload~n", []),
         invalid_request;
     false ->
+        Users = maps:get(users, ParsedJson),
         io:format("Message from validate_create_room_request: Valid payload~n", []),
         maps:put(users, handle_list(Users), ParsedJson) %% we replace the old users with a cleaned version
   end.
 
 validate_chatroom_invitation_request(ParsedJson) ->
-  FromPhoneNumber = maps:get(from_phone_number, ParsedJson, missing_field),
-  ToPhoneNumber   = maps:get(from_phone_number, ParsedJson, missing_field),
-  ChatRoomId      = maps:get(chatroom_id, ParsedJson, missing_field),
-  SessionToken    = maps:get(session_token, ParsedJson, missing_field),
-  case check_missing_or_null([ToPhoneNumber, SessionToken, FromPhoneNumber, ChatRoomId]) of
+
+  case validate_fields([from_phone_number, to_phone_number, session_token, chatroom_id], ParsedJson) of
     true ->
         io:format("Message from validate_chatroom_invitation_request: Invalid payload~n", []),
         invalid_request;
@@ -147,10 +134,8 @@ validate_chatroom_invitation_request(ParsedJson) ->
   end.
 
 validate_leave_room_request(ParsedJson) ->
-  FromPhoneNumber = maps:get(from_phone_number, ParsedJson, missing_field),
-  ChatRoomId      = maps:get(chatroom_id, ParsedJson, missing_field),
-  SessionToken    = maps:get(session_token, ParsedJson, missing_field),
-  case check_missing_or_null([SessionToken, FromPhoneNumber, ChatRoomId]) of
+  
+  case validate_fields([from_phone_number, chatroom_id, session_token], ParsedJson) of
     true ->
         io:format("Message from validate_leave_room_request: Invalid payload~n", []),
         invalid_request;
@@ -167,6 +152,15 @@ validate_transfer_admin_request(ParsedJson) ->
 %%%%%%%%%%%%%%%%%%%%%
 % AUX
 %%%%%%%%%%%%%%%%%%%%%
+
+validate_fields(Fields, ParsedJson) ->
+
+  F = fun(Field) ->
+    maps:get(Field, ParsedJson)
+  end,
+
+  Items = lists:map(F, Fields),
+  check_missing_or_null(Items).
 
 check_missing_or_null(Items) ->
   (lists:member(missing_field, Items)) or (lists:member(null, Items)).
