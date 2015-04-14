@@ -11,7 +11,7 @@
 -record(aurora_message_backlog, {phone_number, messages}).
 -record(aurora_chat_messages, {chat_message_id, chatroom_id, from_phone_number, timestamp, message}).
 -record(aurora_events, {event_id, chatroom_id, event_name, votes}).
--record(aurora_notes, {note_id, chatroom_id, note_text}).
+-record(aurora_notes, {note_id, chatroom_id, note_title, note_text}).
 
 start() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
