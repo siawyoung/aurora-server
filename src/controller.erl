@@ -7,10 +7,11 @@
 -export([append_backlog/2]).
 
 -record(aurora_users, {phone_number, username, session_token, rooms, current_ip, active_socket}).
--record(aurora_chatrooms, {chatroom_id, chatroom_name, room_users, admin_user}).
+-record(aurora_chatrooms, {chatroom_id, chatroom_name, room_users, admin_user, expiry}).
 -record(aurora_message_backlog, {phone_number, messages}).
--record(aurora_chat_messages, {chatroom_id, from_phone_number, timestamp, message, chat_message_id}).
-% -record(aurora_notes, {userID, message}).
+-record(aurora_chat_messages, {chat_message_id, chatroom_id, from_phone_number, timestamp, message}).
+-record(aurora_events, {event_id, chatroom_id, event_name, votes}).
+-record(aurora_notes, {note_id, chatroom_id, note_text}).
 
 start() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).

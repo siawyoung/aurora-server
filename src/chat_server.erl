@@ -5,9 +5,11 @@
 % -export([status_reply/2, status_reply/3, status_reply/4]).
 
 -record(aurora_users, {phone_number, username, session_token, rooms, current_ip, active_socket}).
--record(aurora_chatrooms, {chatroom_id, chatroom_name, room_users, admin_user}).
+-record(aurora_chatrooms, {chatroom_id, chatroom_name, room_users, admin_user, expiry}).
 -record(aurora_message_backlog, {phone_number, messages}).
--record(aurora_chat_messages, {chatroom_id, from_phone_number, timestamp, message, chat_message_id}).
+-record(aurora_chat_messages, {chat_message_id, chatroom_id, from_phone_number, timestamp, message}).
+-record(aurora_events, {event_id, chatroom_id, event_name, votes}).
+-record(aurora_notes, {note_id, chatroom_id, note_text}).
 
 start(Port) ->
     mnesia:wait_for_tables([aurora_users], 5000),
@@ -32,7 +34,15 @@ install(Nodes) ->
     mnesia:create_table(aurora_chat_messages,
                         [{attributes, record_info(fields, aurora_chat_messages)},
                          {disc_copies, Nodes},
-                         {type, bag}]).
+                         {type, set}]),
+    mnesia:create_table(aurora_chat_messages,
+                        [{attributes, record_info(fields, aurora_events)},
+                         {disc_copies, Nodes},
+                         {type, set}]),
+    mnesia:create_table(aurora_chat_messages,
+                        [{attributes, record_info(fields, aurora_notes)},
+                         {disc_copies, Nodes},
+                         {type, set}]).
 
 pre_connected_loop(Socket) ->
     case gen_tcp:recv(Socket, 0) of
@@ -142,18 +152,6 @@ connected_loop(Socket) ->
             ok
 
     end.
-
-% status_reply(Socket, Status) ->
-%     io:format("Status sent: ~p~n", [Status]),
-%     gen_tcp:send(Socket, jsx:encode(#{<<"status">> => Status})).
-
-% status_reply(Socket, Status, Type) ->
-%     io:format("Status sent: ~p~n", [Status]),
-%     gen_tcp:send(Socket, jsx:encode(#{<<"status">> => Status, <<"type">> => Type})).
-
-% status_reply(Socket, Status, Type, Message) ->
-%     io:format("Status sent: ~p~n", [Status]),
-%     gen_tcp:send(Socket, jsx:encode(#{<<"status">> => Status, <<"type">> => Type, <<"message">> => Message})).
 
 cast_update_socket(ParsedJson, Socket) ->
     gen_server:cast(controller, {update_socket, ParsedJson, Socket}).
