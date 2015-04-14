@@ -271,6 +271,29 @@ handle_cast({transfer_admin, ParsedJson, FromSocket}, State) ->
 
     end,
 
+    {noreply, State};
+
+
+handle_cast({get_rooms, ParsedJson, FromSocket}, State) ->
+
+    FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
+    User = find_user(FromPhoneNumber),
+    Rooms = maps:get(rooms, User),
+
+    F = fun(ChatRoomId) ->
+        find_chatroom(ChatRoomId)
+    end,
+
+    RoomsInfo = lists:map(F, Rooms),
+
+    io:format("This is RoomsInfo~n~p~n", [RoomsInfo]),
+
+    messaging:send_message(FromSocket, FromPhoneNumber,
+        jsx:encode(#{
+            <<"chatrooms">> => RoomsInfo,
+            <<"types">> => <<"GET_ROOMS">>
+    })),
+    
     {noreply, State}.
 
 %%%%%%%%%%%%%%%%%%%%%

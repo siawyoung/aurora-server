@@ -87,6 +87,12 @@ validate_and_parse_request(RawData) ->
                 invalid_request -> {missing_fields, <<"TRANSFER_ADMIN">>}
               end;
 
+            <<"GET_ROOMS">> ->
+              case validate_get_rooms_request(ParsedJson) of
+                valid_request   -> ParsedJson;
+                invalid_request -> {missing_fields, <<"GET_ROOMS">>}
+              end;
+
             _ -> wrong_message_type
             
           end
@@ -147,6 +153,16 @@ validate_leave_room_request(ParsedJson) ->
 % because the payload requirements are exactly the same (for now)
 validate_transfer_admin_request(ParsedJson) ->
   validate_chatroom_invitation_request(ParsedJson).
+
+validate_get_rooms_request(ParsedJson) ->
+  case validate_fields([from_phone_number, session_token], ParsedJson) of
+    true ->
+        io:format("Message from validate_get_rooms_request: Invalid payload~n", []),
+        invalid_request;
+    false ->
+        io:format("Message from validate_get_rooms_request: Valid payload~n", []),
+        valid_request
+  end.
 
 
 %%%%%%%%%%%%%%%%%%%%%

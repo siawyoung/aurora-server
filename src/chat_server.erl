@@ -126,6 +126,11 @@ connected_loop(Socket) ->
                                 <<"TRANSFER_ADMIN">> ->
                                     io:format("TRASNFER ADMIN MESSAGE SENT~n", []),
                                     gen_server:cast(controller, {transfer_admin, ParsedJson, Socket}),
+                                    connected_loop(Socket);
+
+                                <<"GET_ROOMS">> ->
+                                    io:format("GET ROOMS MESSAGE SENT~n", []),
+                                    gen_server:cast(controller, {get_rooms, ParsedJson, Socket}),
                                     connected_loop(Socket)
                             end
 
