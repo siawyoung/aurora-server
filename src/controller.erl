@@ -131,6 +131,48 @@ handle_cast({update_socket, ParsedJson, SocketToUpdate}, State) ->
     send_backlog(ParsedJson, SocketToUpdate),
     {noreply, State};
 
+
+% #{phone_number => PhoneNumber,
+%                 username       => UserName, 
+%                 session_token  => SessionToken, 
+%                 rooms          => Rooms, 
+%                 current_ip     => IPaddress, 
+%                 active_socket  => Socket};
+
+handle_cast({get_users, ParsedJson, FromSocket}, State) ->
+
+    Users = maps:get(users, ParsedJson),
+    FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
+        
+    F = fun(UserPhoneNumber) ->
+
+        DatabaseResult = find_user(UserPhoneNumber),
+        io:format("~p~p~n", [UserPhoneNumber, DatabaseResult]),
+        case DatabaseResult of
+            #{username     := UserName, 
+            session_token  := _SessionToken, 
+            rooms          := _Rooms, 
+            current_ip     := _IPaddress, 
+            active_socket  := _Socket} ->
+
+                #{username     => UserName,
+                  phone_number => UserPhoneNumber};
+
+            no_such_user -> no_such_user
+        end
+    end,
+
+    AllUsers = lists:map(F, Users),
+    FilteredUsers = lists:filter(fun(X) -> X =/= no_such_user end, AllUsers),
+
+    messaging:send_message(FromSocket, FromPhoneNumber,
+        jsx:encode(#{
+            <<"users">> => FilteredUsers,
+            <<"type">>  => <<"GET_USERS">>
+            })),
+    {noreply, State};
+
+
 handle_cast({create_single_chatroom, ParsedJson, FromSocket}, State) ->
 
     FromPhoneNumber = maps:get(from_phone_number, ParsedJson),

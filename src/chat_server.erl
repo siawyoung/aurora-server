@@ -118,6 +118,11 @@ connected_loop(Socket) ->
                                     gen_server:cast(controller, {send_chat_message, ParsedJson, Socket}),
                                     connected_loop(Socket);
 
+                                <<"GET_USERS">> ->
+                                    io:format("GET USERS MESSAGE SENT~n",[]),
+                                    gen_server:cast(controller, {get_users, ParsedJson, Socket}),
+                                    connected_loop(Socket);
+
                                 <<"CREATE_SINGLE_ROOM">> ->
                                     io:format("CREATE_ROOM MESSAGE SENT~n",[]),
                                     gen_server:cast(controller, {create_single_chatroom, ParsedJson, Socket}),

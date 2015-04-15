@@ -61,6 +61,13 @@ validate_and_parse_request(RawData) ->
                 valid_request   -> ParsedJson;
                 invalid_request -> {missing_fields, <<"TEXT">>}
               end;
+
+            <<"GET_USERS">> ->
+              case validate_get_users_request(ParsedJson) of
+                invalid_request -> {missing_fields, <<"CREATE_ROOM">>};
+                JsonWithCleanedList -> JsonWithCleanedList
+              end;
+
             <<"CREATE_ROOM">> ->
               %% note that for all payloads involving lists, validation attempts to clean the list up
               %% that's why we return the payload, not an atom
@@ -144,6 +151,18 @@ validate_text_request(ParsedJson) ->
     false ->
         io:format("Message from validate_text_message: Valid payload~n", []),
         valid_request
+  end.
+
+validate_get_users_request(ParsedJson) ->
+
+  case validate_fields([session_token, from_phone_number], ParsedJson) of
+    true ->
+        io:format("Message from validate_get_users_request: Invalid payload~n", []),
+        invalid_request;
+    false ->
+        Users = maps:get(users, ParsedJson),
+        io:format("Message from validate_get_users_request: Valid payload~n", []),
+        maps:put(users, handle_list(Users), ParsedJson) %% we replace the old users with a cleaned version
   end.
 
 validate_create_single_room_request(ParsedJson) ->
