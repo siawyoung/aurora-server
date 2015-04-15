@@ -93,6 +93,30 @@ validate_and_parse_request(RawData) ->
                 invalid_request -> {missing_fields, <<"GET_ROOMS">>}
               end;
 
+            <<"GET_NOTES">> ->
+              case validate_get_notes_request(ParsedJson) of
+                valid_request   -> ParsedJson;
+                invalid_request -> {missing_fields, <<"GET_NOTES">>}
+              end;
+
+            <<"CREATE_NOTE">> ->
+              case validate_create_note_request(ParsedJson) of
+                valid_request   -> ParsedJson;
+                invalid_request -> {missing_fields, <<"CREATE_NOTE">>}
+              end;
+
+            <<"EDIT_NOTE">> ->
+              case validate_edit_note_request(ParsedJson) of
+                valid_request   -> ParsedJson;
+                invalid_request -> {missing_fields, <<"EDIT_NOTE">>}
+              end;
+
+            <<"DELETE_NOTE">> ->
+              case validate_delete_note_request(ParsedJson) of
+                valid_request   -> ParsedJson;
+                invalid_request -> {missing_fields, <<"DELETE_NOTE">>}
+              end;            
+
             _ -> wrong_message_type
             
           end
@@ -164,6 +188,46 @@ validate_get_rooms_request(ParsedJson) ->
         valid_request
   end.
 
+validate_get_notes_request(ParsedJson) ->
+  case validate_fields([from_phone_number, session_token, chatroom_id], ParsedJson) of
+    true ->
+        io:format("Message from validate_get_notes_request: Invalid payload~n", []),
+        invalid_request;
+    false ->
+        io:format("Message from validate_get_notes_request: Valid payload~n", []),
+        valid_request
+  end.
+
+validate_create_note_request(ParsedJson) ->
+  case validate_fields([from_phone_number, session_token, chatroom_id, note_title, note_text], ParsedJson) of
+    true ->
+        io:format("Message from validate_create_note_request: Invalid payload~n", []),
+        invalid_request;
+    false ->
+        io:format("Message from validate_create_note_request: Valid payload~n", []),
+        valid_request
+  end.
+
+validate_edit_note_request(ParsedJson) ->
+  case validate_fields([from_phone_number, session_token, note_id, note_text, chatroom_id], ParsedJson) of
+    true ->
+        io:format("Message from validate_edit_note_request: Invalid payload~n", []),
+        invalid_request;
+    false ->
+        io:format("Message from validate_edit_note_request: Valid payload~n", []),
+        valid_request
+  end.
+
+validate_delete_note_request(ParsedJson) ->
+  io:format("asd~n", []),
+  case validate_fields([from_phone_number, session_token, note_id, chatroom_id], ParsedJson) of
+    true ->
+        io:format("Message from validate_delete_note_request: Invalid payload~n", []),
+        invalid_request;
+    false ->
+        io:format("Message from validate_delete_note_request: Valid payload~n", []),
+        valid_request
+  end.
 
 %%%%%%%%%%%%%%%%%%%%%
 % AUX
@@ -172,7 +236,7 @@ validate_get_rooms_request(ParsedJson) ->
 validate_fields(Fields, ParsedJson) ->
 
   F = fun(Field) ->
-    maps:get(Field, ParsedJson)
+    maps:get(Field, ParsedJson, missing_field)
   end,
 
   Items = lists:map(F, Fields),

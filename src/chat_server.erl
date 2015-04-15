@@ -9,7 +9,7 @@
 -record(aurora_message_backlog, {phone_number, messages}).
 -record(aurora_chat_messages, {chat_message_id, chatroom_id, from_phone_number, timestamp, message}).
 -record(aurora_events, {event_id, chatroom_id, event_name, votes}).
--record(aurora_notes, {note_id, chatroom_id, note_title, note_text}).
+-record(aurora_notes, {note_id, chatroom_id, note_title, note_text, from_phone_number}).
 
 start(Port) ->
     mnesia:wait_for_tables([aurora_users], 5000),
@@ -35,11 +35,11 @@ install(Nodes) ->
                         [{attributes, record_info(fields, aurora_chat_messages)},
                          {disc_copies, Nodes},
                          {type, set}]),
-    mnesia:create_table(aurora_chat_messages,
+    mnesia:create_table(aurora_events,
                         [{attributes, record_info(fields, aurora_events)},
                          {disc_copies, Nodes},
                          {type, set}]),
-    mnesia:create_table(aurora_chat_messages,
+    mnesia:create_table(aurora_notes,
                         [{attributes, record_info(fields, aurora_notes)},
                          {disc_copies, Nodes},
                          {type, set}]).
@@ -141,7 +141,28 @@ connected_loop(Socket) ->
                                 <<"GET_ROOMS">> ->
                                     io:format("GET ROOMS MESSAGE SENT~n", []),
                                     gen_server:cast(controller, {get_rooms, ParsedJson, Socket}),
+                                    connected_loop(Socket);
+
+                                <<"CREATE_NOTE">> ->
+                                    io:format("GET ROOMS MESSAGE SENT~n", []),
+                                    gen_server:cast(controller, {create_note, ParsedJson, Socket}),
+                                    connected_loop(Socket);
+
+                                <<"GET_NOTES">> ->
+                                    io:format("GET ROOMS MESSAGE SENT~n", []),
+                                    gen_server:cast(controller, {get_notes, ParsedJson, Socket}),
+                                    connected_loop(Socket);
+
+                                <<"EDIT_NOTE">> ->
+                                    io:format("GET ROOMS MESSAGE SENT~n", []),
+                                    gen_server:cast(controller, {edit_note, ParsedJson, Socket}),
+                                    connected_loop(Socket);
+
+                                <<"DELETE_NOTE">> ->
+                                    io:format("GET ROOMS MESSAGE SENT~n", []),
+                                    gen_server:cast(controller, {delete_note, ParsedJson, Socket}),
                                     connected_loop(Socket)
+
                             end
 
                     end

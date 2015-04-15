@@ -11,7 +11,7 @@
 -record(aurora_message_backlog, {phone_number, messages}).
 -record(aurora_chat_messages, {chat_message_id, chatroom_id, from_phone_number, timestamp, message}).
 -record(aurora_events, {event_id, chatroom_id, event_name, votes}).
--record(aurora_notes, {note_id, chatroom_id, note_title, note_text}).
+-record(aurora_notes, {note_id, chatroom_id, note_title, note_text, from_phone_number}).
 
 start() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
@@ -287,15 +287,151 @@ handle_cast({get_rooms, ParsedJson, FromSocket}, State) ->
 
     RoomsInfo = lists:map(F, Rooms),
 
-    io:format("This is RoomsInfo~n~p~n", [RoomsInfo]),
-
     messaging:send_message(FromSocket, FromPhoneNumber,
         jsx:encode(#{
             <<"chatrooms">> => RoomsInfo,
-            <<"types">> => <<"GET_ROOMS">>
+            <<"type">> => <<"GET_ROOMS">>
     })),
     
+    {noreply, State};
+
+handle_cast({get_notes, ParsedJson, FromSocket}, State) ->
+
+    FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
+    ChatRoomId      = maps:get(chatroom_id, ParsedJson),
+
+    Room = find_chatroom(ChatRoomId),
+
+    case Room of
+        no_such_room ->
+            messaging:send_status_queue(FromSocket, FromPhoneNumber, 5, <<"GET_NOTES">>, <<"No such room">>);
+        FoundRoom ->
+            % check if user in room and vice versa
+            case check_if_user_in_room(FoundRoom, FromPhoneNumber) of
+
+                false ->
+                    messaging:send_status_queue(FromSocket, FromPhoneNumber, 5, <<"GET_NOTES">>, <<"User is not a member of the chatroom.">>);
+                true ->
+                    
+                    case find_notes(ChatRoomId) of
+
+                        no_notes ->
+                            messaging:send_message(FromSocket, FromPhoneNumber,
+                                jsx:encode(#{
+                                    <<"chatroom_id">> => ChatRoomId,
+                                    <<"notes">> => [],
+                                    <<"type">> => <<"GET_NOTES">>
+                            }));
+                            
+                        FoundNotes ->
+                            io:format("~p~n", [FoundNotes]),
+                            messaging:send_message(FromSocket, FromPhoneNumber,
+                                jsx:encode(#{
+                                    <<"chatroom_id">> => ChatRoomId,
+                                    <<"notes">> => FoundNotes,
+                                    <<"type">> => <<"GET_NOTES">>
+                            }))
+
+                        % _ -> error
+
+                    end
+                    
+            end
+    end,
+
+    {noreply, State};
+
+handle_cast({create_note, ParsedJson, FromSocket}, State) ->
+
+    FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
+    ChatRoomId      = maps:get(chatroom_id, ParsedJson),
+
+    Room = find_chatroom(ChatRoomId),
+
+    case Room of
+        no_such_room ->
+            messaging:send_status_queue(FromSocket, FromPhoneNumber, 5, <<"GET_NOTES">>, <<"No such room">>);
+        FoundRoom ->
+            % check if user in room and vice versa
+            case check_if_user_in_room(FoundRoom, FromPhoneNumber) of
+
+                false ->
+                    messaging:send_status_queue(FromSocket, FromPhoneNumber, 5, <<"GET_NOTES">>, <<"User is not a member of the chatroom.">>);
+                true ->
+                    
+                    case create_note(ParsedJson) of
+                        {ok, note_created, NoteID} ->
+                            messaging:send_status_queue(FromSocket, FromPhoneNumber, 1, <<"CREATE_NOTE">>, #{<<"note_id">> => NoteID});
+                        create_note_error ->
+                            messaging:send_status_queue(FromSocket, FromPhoneNumber, 3, <<"CREATE_NOTE">>)
+
+                    end                    
+            end
+    end,
+
+    {noreply, State};
+
+handle_cast({edit_note, ParsedJson, FromSocket}, State) ->
+
+    FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
+    NoteID          = maps:get(note_id, ParsedJson),
+    ChatRoomId      = maps:get(chatroom_id, ParsedJson),
+
+    Room = find_chatroom(ChatRoomId),
+
+    case Room of
+        no_such_room ->
+            messaging:send_status_queue(FromSocket, FromPhoneNumber, 5, <<"GET_NOTES">>, <<"No such room">>);
+        FoundRoom ->
+            % check if user in room and vice versa
+            case check_if_user_in_room(FoundRoom, FromPhoneNumber) of
+
+                false ->
+                    messaging:send_status_queue(FromSocket, FromPhoneNumber, 5, <<"GET_NOTES">>, <<"User is not a member of the chatroom.">>);
+                true ->
+                    
+                    case edit_note(ParsedJson) of
+                        ok ->
+                            messaging:send_status_queue(FromSocket, FromPhoneNumber, 1, <<"EDIT_NOTE">>, #{<<"note_id">> => NoteID});
+                        _ ->
+                        messaging:send_status_queue(FromSocket, FromPhoneNumber, 3, <<"EDIT_NOTE">>, #{<<"note_id">> => NoteID})
+                    end
+            end
+    end,
+
+    {noreply, State};
+
+
+handle_cast({delete_note, ParsedJson, FromSocket}, State) ->
+
+    FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
+    NoteID          = maps:get(note_id, ParsedJson),
+    ChatRoomId      = maps:get(chatroom_id, ParsedJson),
+
+    Room = find_chatroom(ChatRoomId),
+
+    case Room of
+        no_such_room ->
+            messaging:send_status_queue(FromSocket, FromPhoneNumber, 5, <<"GET_NOTES">>, <<"No such room">>);
+        FoundRoom ->
+            % check if user in room and vice versa
+            case check_if_user_in_room(FoundRoom, FromPhoneNumber) of
+
+                false ->
+                    messaging:send_status_queue(FromSocket, FromPhoneNumber, 5, <<"GET_NOTES">>, <<"User is not a member of the chatroom.">>);
+                true ->
+                    
+                    case delete_note(ParsedJson) of
+                        ok ->
+                            messaging:send_status_queue(FromSocket, FromPhoneNumber, 1, <<"DELETE_NOTE">>, #{<<"note_id">> => NoteID});
+                        _ ->
+                        messaging:send_status_queue(FromSocket, FromPhoneNumber, 3, <<"DELETE_NOTE">>, #{<<"note_id">> => NoteID})
+                    end
+            end
+    end,
+
     {noreply, State}.
+
 
 %%%%%%%%%%%%%%%%%%%%%
 %%% Main functions
@@ -344,7 +480,7 @@ send_chatroom_invitation(ChatRoomId, ChatRoomName, Users, Socket, PhoneNumber) -
 %% may need to write another version for just ChatRoomID
 check_if_user_in_room(Room, PhoneNumber) ->
     User = find_user(PhoneNumber),
-    lists:member(maps:get(chatroom_id, Room), maps:get(rooms, User)) and lists:member(PhoneNumber, maps:get(room_users, Room)).
+    not(maps:get(rooms, User) == undefined) andalso lists:member(maps:get(chatroom_id, Room), maps:get(rooms, User)) and lists:member(PhoneNumber, maps:get(room_users, Room)).
     
 add_room_to_user(ChatRoomId, PhoneNumber) ->
     User = find_user(PhoneNumber),
@@ -715,9 +851,67 @@ create_chat_message(ParsedJson) ->
     end,
     mnesia:activity(transaction, F).
 
-% create_user_to_room(Name, RoomId)
-% leave_room(Name, RoomId)
-% delete_room(Name, RoomId) % to verify that he's indeed the admin of the room
+find_notes(ChatRoomId) ->
+    F = fun() ->
+        case mnesia:match_object({aurora_notes, '_', ChatRoomId, '_', '_', '_'}) of
+            [] ->
+                no_notes;
+            Notes ->
+                F = fun(Note) ->
+                    {aurora_notes, NoteID, ChatRoomId, NoteTitle, NoteText, FromPhoneNumber} = Note,
+                    #{note_id => NoteID, chatroom_id => ChatRoomId, note_title => NoteTitle, note_text => NoteText, from_phone_number => FromPhoneNumber}
+                end,
+                lists:map(F, Notes)
+        end
+    end,
+    mnesia:activity(transaction, F).
+
+
+create_note(ParsedJson) ->
+
+    NoteID          = timestamp_now(),
+    NoteTitle       = maps:get(note_title, ParsedJson),
+    NoteText        = maps:get(note_text, ParsedJson),
+    FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
+    ChatRoomId      = maps:get(chatroom_id, ParsedJson),
+
+    F = fun() ->
+
+        Status = mnesia:write(#aurora_notes{note_id           = NoteID, 
+                                            note_title        = NoteTitle,
+                                            note_text         = NoteText,
+                                            from_phone_number = FromPhoneNumber,
+                                            chatroom_id       = ChatRoomId}),
+
+        case Status of
+            ok -> {ok, note_created, NoteID};
+            _  -> create_note_error
+        end
+    end,
+    mnesia:activity(transaction, F).
+
+
+edit_note(ParsedJson) ->
+
+    NoteID   = maps:get(note_id, ParsedJson),
+    NoteText = maps:get(note_text, ParsedJson),
+
+    F = fun() ->
+        [ExistingNote] = mnesia:wread({aurora_notes, NoteID}),
+        UpdatedNote = ExistingNote#aurora_notes{note_text = NoteText},
+        mnesia:write(UpdatedNote)
+    end,
+
+    mnesia:activity(transaction, F).
+
+delete_note(ParsedJson) ->
+
+    NoteID = maps:get(note_id, ParsedJson),
+
+    F = fun() ->
+        mnesia:delete({aurora_notes, NoteID})
+    end,
+    mnesia:activity(transaction, F).
 
 %%%%%%%%%%%%%%%%%%%%%%%%
 %%% Auxilliary functions
