@@ -69,6 +69,12 @@ validate_and_parse_request(RawData) ->
                 JsonWithCleanedList -> JsonWithCleanedList
               end;
 
+            <<"CREATE_SINGLE_ROOM">> ->
+              case validate_create_single_room_request(ParsedJson) of
+                valid_request   -> ParsedJson;
+                invalid_request -> {missing_fields, <<"CREATE_SINGLE_ROOM">>}
+              end;
+
             <<"ROOM_INVITATION">> ->
               case validate_chatroom_invitation_request(ParsedJson) of
                 valid_request   -> ParsedJson;
@@ -140,9 +146,20 @@ validate_text_request(ParsedJson) ->
         valid_request
   end.
 
+validate_create_single_room_request(ParsedJson) ->
+
+  case validate_fields([session_token, from_phone_number, to_phone_number, expiry], ParsedJson) of
+    true ->
+        io:format("Message from validate_create_single_room_request: Invalid payload~n", []),
+        invalid_request;
+    false ->
+        io:format("Message from validate_create_single_room_request: Valid payload~n", []),
+        valid_request
+  end.
+
 validate_create_room_request(ParsedJson) ->
   
-  case validate_fields([chatroom_name, session_token, from_phone_number, users], ParsedJson) of
+  case validate_fields([chatroom_name, session_token, from_phone_number, users, expiry], ParsedJson) of
     true ->
         io:format("Message from validate_create_room_request: Invalid payload~n", []),
         invalid_request;

@@ -5,7 +5,7 @@
 % -export([status_reply/2, status_reply/3, status_reply/4]).
 
 -record(aurora_users, {phone_number, username, session_token, rooms, current_ip, active_socket}).
--record(aurora_chatrooms, {chatroom_id, chatroom_name, room_users, admin_user, expiry}).
+-record(aurora_chatrooms, {chatroom_id, chatroom_name, room_users, admin_user, expiry, group}).
 -record(aurora_message_backlog, {phone_number, messages}).
 -record(aurora_chat_messages, {chat_message_id, chatroom_id, from_phone_number, timestamp, message}).
 -record(aurora_events, {event_id, chatroom_id, event_name, votes}).
@@ -118,8 +118,13 @@ connected_loop(Socket) ->
                                     gen_server:cast(controller, {send_chat_message, ParsedJson, Socket}),
                                     connected_loop(Socket);
 
-                                <<"CREATE_ROOM">> ->
+                                <<"CREATE_SINGLE_ROOM">> ->
                                     io:format("CREATE_ROOM MESSAGE SENT~n",[]),
+                                    gen_server:cast(controller, {create_single_chatroom, ParsedJson, Socket}),
+                                    connected_loop(Socket);
+
+                                <<"CREATE_ROOM">> ->
+                                    io:format("CREATE SINGLE ROOM MESSAGE SENT~n",[]),
                                     gen_server:cast(controller, {create_chatroom, ParsedJson, Socket}),
                                     connected_loop(Socket);
 
@@ -144,23 +149,43 @@ connected_loop(Socket) ->
                                     connected_loop(Socket);
 
                                 <<"CREATE_NOTE">> ->
-                                    io:format("GET ROOMS MESSAGE SENT~n", []),
+                                    io:format("CREATE NOTE MESSAGE SENT~n", []),
                                     gen_server:cast(controller, {create_note, ParsedJson, Socket}),
                                     connected_loop(Socket);
 
                                 <<"GET_NOTES">> ->
-                                    io:format("GET ROOMS MESSAGE SENT~n", []),
+                                    io:format("GET NOTES MESSAGE SENT~n", []),
                                     gen_server:cast(controller, {get_notes, ParsedJson, Socket}),
                                     connected_loop(Socket);
 
                                 <<"EDIT_NOTE">> ->
-                                    io:format("GET ROOMS MESSAGE SENT~n", []),
+                                    io:format("EDIT NOTE MESSAGE SENT~n", []),
                                     gen_server:cast(controller, {edit_note, ParsedJson, Socket}),
                                     connected_loop(Socket);
 
                                 <<"DELETE_NOTE">> ->
-                                    io:format("GET ROOMS MESSAGE SENT~n", []),
+                                    io:format("DELETE NOTE MESSAGE SENT~n", []),
                                     gen_server:cast(controller, {delete_note, ParsedJson, Socket}),
+                                    connected_loop(Socket);
+
+                                <<"CREATE_EVENT">> ->
+                                    io:format("CREATE EVENT MESSAGE SENT~n", []),
+                                    gen_server:cast(controller, {create_event, ParsedJson, Socket}),
+                                    connected_loop(Socket);
+
+                                <<"GET_EVENTS">> ->
+                                    io:format("GET EVENTS MESSAGE SENT~n", []),
+                                    gen_server:cast(controller, {get_events, ParsedJson, Socket}),
+                                    connected_loop(Socket);
+
+                                <<"EDIT_EVENT">> ->
+                                    io:format("EDIT EVENT MESSAGE SENT~n", []),
+                                    gen_server:cast(controller, {edit_event, ParsedJson, Socket}),
+                                    connected_loop(Socket);
+
+                                <<"DELETE_EVENT">> ->
+                                    io:format("DELETE EVENT MESSAGE SENT~n", []),
+                                    gen_server:cast(controller, {delete_event, ParsedJson, Socket}),
                                     connected_loop(Socket)
 
                             end

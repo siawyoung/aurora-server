@@ -7,7 +7,7 @@
 -export([append_backlog/2]).
 
 -record(aurora_users, {phone_number, username, session_token, rooms, current_ip, active_socket}).
--record(aurora_chatrooms, {chatroom_id, chatroom_name, room_users, admin_user, expiry}).
+-record(aurora_chatrooms, {chatroom_id, chatroom_name, room_users, admin_user, expiry, group}).
 -record(aurora_message_backlog, {phone_number, messages}).
 -record(aurora_chat_messages, {chat_message_id, chatroom_id, from_phone_number, timestamp, message}).
 -record(aurora_events, {event_id, chatroom_id, event_name, votes}).
@@ -131,6 +131,45 @@ handle_cast({update_socket, ParsedJson, SocketToUpdate}, State) ->
     send_backlog(ParsedJson, SocketToUpdate),
     {noreply, State};
 
+handle_cast({create_single_chatroom, ParsedJson, FromSocket}, State) ->
+
+    FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
+    ToPhoneNumber = maps:get(to_phone_number, ParsedJson),
+    InsertUsersAndGroupType = maps:merge(#{users => [FromPhoneNumber, ToPhoneNumber], group => false}, ParsedJson),
+
+    ValidateResult = validate_users([FromPhoneNumber,ToPhoneNumber]),
+
+    case ValidateResult of
+
+        {ok, users_validated, UserInfo} ->
+    
+            DatabaseResult = create_chatroom(InsertUsersAndGroupType),
+            case DatabaseResult of
+                {ok, room_created, ChatRoomId, ChatRoomName, Users, Expiry} ->
+
+                    messaging:send_message(FromSocket, FromPhoneNumber, 
+                    jsx:encode(#{
+                        <<"status">>        => 1,
+                        <<"chatroom_id">>   => ChatRoomId,
+                        <<"type">>          => <<"CREATE_SINGLE_ROOM">>
+                    })),
+
+                    % send status to all users
+                    F = fun(User) ->
+                        send_chatroom_invitation(ChatRoomId, ChatRoomName, Users, maps:get(active_socket, User), maps:get(phone_number, User), Expiry, single)
+                    end,
+                    lists:foreach(F, UserInfo);
+
+                error ->
+                    messaging:send_status_queue(FromSocket, FromPhoneNumber, 3, <<"CREATE_ROOM">>, <<"Database transaction error">>)
+            end;
+
+        error ->
+            messaging:send_status_queue(FromSocket, FromPhoneNumber, 5, <<"CREATE_SINGLE_ROOM">>, <<"Some users are invalid">>)
+    end,
+
+    {noreply, State};
+
 handle_cast({create_chatroom, ParsedJson, FromSocket}, State) ->
 
     FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
@@ -144,7 +183,7 @@ handle_cast({create_chatroom, ParsedJson, FromSocket}, State) ->
     
             DatabaseResult = create_chatroom(ParsedJson),
             case DatabaseResult of
-                {ok, room_created, ChatRoomId, ChatRoomName, Users} ->
+                {ok, room_created, ChatRoomId, ChatRoomName, Users, Expiry} ->
 
                     % no need to abtract out yet??
                     messaging:send_message(FromSocket, FromPhoneNumber, 
@@ -156,7 +195,7 @@ handle_cast({create_chatroom, ParsedJson, FromSocket}, State) ->
 
                     % send status to all users
                     F = fun(User) ->
-                        send_chatroom_invitation(ChatRoomId, ChatRoomName, Users, maps:get(active_socket, User), maps:get(phone_number, User))
+                        send_chatroom_invitation(ChatRoomId, ChatRoomName, Users, maps:get(active_socket, User), maps:get(phone_number, User), Expiry, group)
                     end,
                     lists:foreach(F, UserInfo);
 
@@ -190,8 +229,9 @@ handle_cast({room_invitation, ParsedJson, FromSocket}, State) ->
 
                 user_is_admin ->
                     ChatRoomName = maps:get(chatroom_name, Room),
+                    Expiry       = maps:get(expiry, Room),
                     UpdatedUsers = add_user_to_room(Room, ToPhoneNumber),
-                    send_chatroom_invitation(ChatRoomId, ChatRoomName, UpdatedUsers, maps:get(active_socket, User), maps:get(phone_number, User)),
+                    send_chatroom_invitation(ChatRoomId, ChatRoomName, UpdatedUsers, maps:get(active_socket, User), maps:get(phone_number, User), Expiry, group),
                     messaging:send_status_queue(FromSocket, FromPhoneNumber, 1, <<"ROOM_INVITATION">>, <<"User invited successfully">>);
                 user_not_admin ->
                     messaging:send_status_queue(FromSocket, FromPhoneNumber, 8, <<"ROOM_INVITATION">>, <<"User is not admin of the room">>)
@@ -466,16 +506,35 @@ send_chat_message(UserFound, ParsedJson, MessageID, FromSocket) ->
     end.
 
 
-send_chatroom_invitation(ChatRoomId, ChatRoomName, Users, Socket, PhoneNumber) ->
+send_chatroom_invitation(ChatRoomId, ChatRoomName, Users, Socket, PhoneNumber, Expiry, Type) ->
 
-    messaging:send_message(Socket, PhoneNumber,
-        jsx:encode(#{
-            <<"chatroom_id">>   => ChatRoomId,
-            <<"chatroom_name">> => ChatRoomName,
-            <<"users">>         => Users,
-            <<"type">>          => <<"ROOM_INVITATION">>
-        })),
+    if
+        Type == group ->
+
+            messaging:send_message(Socket, PhoneNumber,
+                jsx:encode(#{
+                    <<"chatroom_id">>   => ChatRoomId,
+                    <<"chatroom_name">> => ChatRoomName,
+                    <<"users">>         => Users,
+                    <<"type">>          => <<"ROOM_INVITATION">>,
+                    <<"expiry">>        => Expiry,
+                    <<"group">>         => true
+                }));
+
+        Type == single ->
+
+            messaging:send_message(Socket, PhoneNumber,
+                jsx:encode(#{
+                    <<"chatroom_id">>   => ChatRoomId,
+                    <<"users">>         => Users,
+                    <<"type">>          => <<"SINGLE_ROOM_INVITATION">>,
+                    <<"expiry">>        => Expiry,
+                    <<"group">>         => false
+                }))
+    end,
+
     add_room_to_user(ChatRoomId, PhoneNumber).
+
 
 %% may need to write another version for just ChatRoomID
 check_if_user_in_room(Room, PhoneNumber) ->
@@ -738,8 +797,10 @@ create_user(ParsedJson, Socket) ->
 create_chatroom(ParsedJson) ->
 
     AdminUser    = maps:get(from_phone_number, ParsedJson),
-    ChatRoomName = maps:get(chatroom_name, ParsedJson),
+    ChatRoomName = maps:get(chatroom_name, ParsedJson, null),
     Users        = maps:get(users, ParsedJson),
+    Group        = maps:get(group, ParsedJson, true),
+    Expiry       = maps:get(expiry, ParsedJson),
 
     ChatRoomId   = timestamp_now(),
 
@@ -747,9 +808,11 @@ create_chatroom(ParsedJson) ->
         Status = mnesia:write(#aurora_chatrooms{chatroom_id   = ChatRoomId,
                                                 admin_user    = AdminUser,
                                                 chatroom_name = ChatRoomName,
+                                                group         = Group,
+                                                expiry        = Expiry,
                                                 room_users    = Users}),
         case Status of
-            ok -> {ok, room_created, ChatRoomId, ChatRoomName, Users};
+            ok -> {ok, room_created, ChatRoomId, ChatRoomName, Users, Expiry};
             _  -> error
         end
 
