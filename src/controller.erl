@@ -497,7 +497,6 @@ handle_cast({vote_event, ParsedJson, FromSocket}, State) ->
     case room_check(ParsedJson, FromSocket, <<"EVENT_VOTE">>) of
         false -> meh;
         true  ->
-            io:format("test!~n", []),
             FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
             EventID = maps:get(event_id, ParsedJson),
 
@@ -1109,7 +1108,6 @@ vote_event(ParsedJson) ->
         case lists:member(FromPhoneNumber, Votes) of
             true -> vote_already_cast;
             false ->
-                io:format("here!~n", []),
                 UpdatedVotes = lists:append(Votes, [FromPhoneNumber]),
                 UpdatedEvent = ExistingEvent#aurora_events{votes = UpdatedVotes},
                 mnesia:write(UpdatedEvent)
