@@ -128,7 +128,31 @@ validate_and_parse_request(RawData) ->
               case validate_delete_note_request(ParsedJson) of
                 valid_request   -> ParsedJson;
                 invalid_request -> {missing_fields, <<"DELETE_NOTE">>}
-              end;            
+              end; 
+
+            <<"CREATE_EVENT">> ->
+              case validate_create_event_request(ParsedJson) of
+                valid_request   -> ParsedJson;
+                invalid_request -> {missing_fields, <<"CREATE_EVENT">>}
+              end;
+
+            <<"GET_EVENTS">> ->
+              case validate_get_events_request(ParsedJson) of
+                valid_request   -> ParsedJson;
+                invalid_request -> {missing_fields, <<"GET_EVENTS">>}
+              end;
+
+            <<"EVENT_VOTE">> ->
+              case validate_event_vote_request(ParsedJson) of
+                valid_request   -> ParsedJson;
+                invalid_request -> {missing_fields, <<"EVENT_VOTE">>}
+              end;
+
+            <<"EVENT_UNVOTE">> ->
+              case validate_event_vote_request(ParsedJson) of
+                valid_request   -> ParsedJson;
+                invalid_request -> {missing_fields, <<"EVENT_UNVOTE">>}
+              end;           
 
             _ -> wrong_message_type
             
@@ -255,13 +279,43 @@ validate_edit_note_request(ParsedJson) ->
   end.
 
 validate_delete_note_request(ParsedJson) ->
-  io:format("asd~n", []),
   case validate_fields([from_phone_number, session_token, note_id, chatroom_id], ParsedJson) of
     true ->
         io:format("Message from validate_delete_note_request: Invalid payload~n", []),
         invalid_request;
     false ->
         io:format("Message from validate_delete_note_request: Valid payload~n", []),
+        valid_request
+  end.
+
+validate_create_event_request(ParsedJson) ->
+  case validate_fields([from_phone_number, session_token, event_name, chatroom_id], ParsedJson) of
+    true ->
+        io:format("Message from validate_create_event_request: Invalid payload~n", []),
+        invalid_request;
+    false ->
+        io:format("Message from validate_create_event_request: Valid payload~n", []),
+        valid_request
+  end.
+  
+
+validate_get_events_request(ParsedJson) ->
+  case validate_fields([from_phone_number, session_token, event_name, chatroom_id], ParsedJson) of
+    true ->
+        io:format("Message from validate_get_events_request: Invalid payload~n", []),
+        invalid_request;
+    false ->
+        io:format("Message from validate_get_events_request: Valid payload~n", []),
+        valid_request
+  end.
+
+validate_event_vote_request(ParsedJson) ->
+  case validate_fields([from_phone_number, session_token, event_id, chatroom_id], ParsedJson) of
+    true ->
+        io:format("Message from validate_event_vote_request: Invalid payload~n", []),
+        invalid_request;
+    false ->
+        io:format("Message from validate_event_vote_request: Valid payload~n", []),
         valid_request
   end.
 
