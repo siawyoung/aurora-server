@@ -80,10 +80,10 @@ handle_call({authorize_request, ParsedJson}, _From, State) ->
 
 handle_cast({send_chat_message, ParsedJson, FromSocket}, State) ->
 
-    ChatRoomId = maps:get(chatroom_id, ParsedJson),
+    ChatRoomID = maps:get(chatroom_id, ParsedJson),
     FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
 
-    RoomInfo = find_chatroom(ChatRoomId),
+    RoomInfo = find_chatroom(ChatRoomID),
     case RoomInfo of
 
         no_such_room -> 
@@ -179,18 +179,18 @@ handle_cast({create_single_chatroom, ParsedJson, FromSocket}, State) ->
     
             DatabaseResult = create_chatroom(InsertUsersAndGroupType),
             case DatabaseResult of
-                {ok, room_created, ChatRoomId, ChatRoomName, Users, Expiry} ->
+                {ok, room_created, ChatRoomID, ChatRoomName, Users, Expiry} ->
 
                     messaging:send_message(FromSocket, FromPhoneNumber, 
                     jsx:encode(#{
                         <<"status">>        => 1,
-                        <<"chatroom_id">>   => ChatRoomId,
+                        <<"chatroom_id">>   => ChatRoomID,
                         <<"type">>          => <<"CREATE_SINGLE_ROOM">>
                     })),
 
                     % send status to all users
                     F = fun(User) ->
-                        send_chatroom_invitation(ChatRoomId, ChatRoomName, Users, maps:get(active_socket, User), maps:get(phone_number, User), Expiry, single)
+                        send_chatroom_invitation(ChatRoomID, ChatRoomName, Users, maps:get(active_socket, User), maps:get(phone_number, User), Expiry, single)
                     end,
                     lists:foreach(F, UserInfo);
 
@@ -217,19 +217,19 @@ handle_cast({create_chatroom, ParsedJson, FromSocket}, State) ->
     
             DatabaseResult = create_chatroom(ParsedJson),
             case DatabaseResult of
-                {ok, room_created, ChatRoomId, ChatRoomName, Users, Expiry} ->
+                {ok, room_created, ChatRoomID, ChatRoomName, Users, Expiry} ->
 
                     % no need to abtract out yet??
                     messaging:send_message(FromSocket, FromPhoneNumber, 
                     jsx:encode(#{
                         <<"status">>        => 1,
-                        <<"chatroom_id">>   => ChatRoomId,
+                        <<"chatroom_id">>   => ChatRoomID,
                         <<"type">>          => <<"CREATE_ROOM">>
                     })),
 
                     % send status to all users
                     F = fun(User) ->
-                        send_chatroom_invitation(ChatRoomId, ChatRoomName, Users, maps:get(active_socket, User), maps:get(phone_number, User), Expiry, group)
+                        send_chatroom_invitation(ChatRoomID, ChatRoomName, Users, maps:get(active_socket, User), maps:get(phone_number, User), Expiry, group)
                     end,
                     lists:foreach(F, UserInfo);
 
@@ -246,11 +246,11 @@ handle_cast({room_invitation, ParsedJson, FromSocket}, State) ->
     
     FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
     ToPhoneNumber   = maps:get(to_phone_number, ParsedJson),
-    ChatRoomId      = maps:get(chatroom_id, ParsedJson),
+    ChatRoomID      = maps:get(chatroom_id, ParsedJson),
 
 
     User = find_user(ToPhoneNumber),
-    Room = find_chatroom(ChatRoomId),
+    Room = find_chatroom(ChatRoomID),
 
     if
         User == no_such_user ->
@@ -259,13 +259,13 @@ handle_cast({room_invitation, ParsedJson, FromSocket}, State) ->
             messaging:send_status_queue(FromSocket, FromPhoneNumber, 5, <<"ROOM_INVITATION">>, <<"No such room">>);
         true ->
 
-            case check_if_user_admin(FromPhoneNumber, ChatRoomId) of
+            case check_if_user_admin(FromPhoneNumber, ChatRoomID) of
 
                 user_is_admin ->
                     ChatRoomName = maps:get(chatroom_name, Room),
                     Expiry       = maps:get(expiry, Room),
                     UpdatedUsers = add_user_to_room(Room, ToPhoneNumber),
-                    send_chatroom_invitation(ChatRoomId, ChatRoomName, UpdatedUsers, maps:get(active_socket, User), maps:get(phone_number, User), Expiry, group),
+                    send_chatroom_invitation(ChatRoomID, ChatRoomName, UpdatedUsers, maps:get(active_socket, User), maps:get(phone_number, User), Expiry, group),
                     messaging:send_status_queue(FromSocket, FromPhoneNumber, 1, <<"ROOM_INVITATION">>, <<"User invited successfully">>);
                 user_not_admin ->
                     messaging:send_status_queue(FromSocket, FromPhoneNumber, 8, <<"ROOM_INVITATION">>, <<"User is not admin of the room">>)
@@ -280,15 +280,15 @@ handle_cast({leave_room, ParsedJson, FromSocket}, State) ->
         false -> meh;
         true ->
             FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
-            ChatRoomId      = maps:get(chatroom_id, ParsedJson),
-            Room            = find_chatroom(ChatRoomId),
+            ChatRoomID      = maps:get(chatroom_id, ParsedJson),
+            Room            = find_chatroom(ChatRoomID),
             % admin cannot leave the room until they transfer admin rights
-            case check_if_user_admin(FromPhoneNumber, ChatRoomId) of
+            case check_if_user_admin(FromPhoneNumber, ChatRoomID) of
 
             user_not_admin ->
-                remove_room_from_user(ChatRoomId, FromPhoneNumber),
+                remove_room_from_user(ChatRoomID, FromPhoneNumber),
                 remove_user_from_room(Room, FromPhoneNumber),
-                messaging:send_status_queue(FromSocket, FromPhoneNumber, 1, <<"LEAVE_ROOM">>, #{<<"chatroom_id">> => ChatRoomId});
+                messaging:send_status_queue(FromSocket, FromPhoneNumber, 1, <<"LEAVE_ROOM">>, #{<<"chatroom_id">> => ChatRoomID});
             user_is_admin -> 
                 messaging:send_status_queue(FromSocket, FromPhoneNumber, 8, <<"ROOM_INVITATION">>, <<"User is the admin of the room. Admins cannot leave the room until they transfer admin rights.">>)
             end
@@ -300,10 +300,10 @@ handle_cast({transfer_admin, ParsedJson, FromSocket}, State) ->
 
     FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
     ToPhoneNumber   = maps:get(to_phone_number, ParsedJson),
-    ChatRoomId      = maps:get(chatroom_id, ParsedJson),
+    ChatRoomID      = maps:get(chatroom_id, ParsedJson),
 
     NewAdminUser = find_user(ToPhoneNumber),
-    FoundRoom    = find_chatroom(ChatRoomId),
+    FoundRoom    = find_chatroom(ChatRoomID),
 
     if 
         NewAdminUser == no_such_user ->
@@ -317,18 +317,18 @@ handle_cast({transfer_admin, ParsedJson, FromSocket}, State) ->
                 false ->
                     messaging:send_status_queue(FromSocket, FromPhoneNumber, 5, <<"TRANSFER_ADMIN">>, <<"User is not a member of the chatroom.">>);
                 true ->
-                    case check_if_user_admin(FromPhoneNumber, ChatRoomId) of
+                    case check_if_user_admin(FromPhoneNumber, ChatRoomID) of
 
                     user_not_admin ->
                         messaging:send_status_queue(FromSocket, FromPhoneNumber, 8, <<"TRANSFER_ADMIN">>, <<"User is not admin of the room">>);
                     user_is_admin -> 
-                        update_chatroom(change_admin, ChatRoomId, ToPhoneNumber),
+                        update_chatroom(change_admin, ChatRoomID, ToPhoneNumber),
                         
-                        messaging:send_status_queue(FromSocket, FromPhoneNumber, 1, <<"TRANSFER_ADMIN">>, #{<<"chatroom_id">> => ChatRoomId}),
+                        messaging:send_status_queue(FromSocket, FromPhoneNumber, 1, <<"TRANSFER_ADMIN">>, #{<<"chatroom_id">> => ChatRoomID}),
                         
                         messaging:send_message(maps:get(active_socket, NewAdminUser), ToPhoneNumber, 
                             jsx:encode(#{
-                            <<"chatroom_id">> => ChatRoomId,
+                            <<"chatroom_id">> => ChatRoomID,
                             <<"type">> => <<"NEW_ADMIN">>
                         }))
 
@@ -347,8 +347,8 @@ handle_cast({get_rooms, ParsedJson, FromSocket}, State) ->
     User = find_user(FromPhoneNumber),
     Rooms = maps:get(rooms, User),
 
-    F = fun(ChatRoomId) ->
-        find_chatroom(ChatRoomId)
+    F = fun(ChatRoomID) ->
+        find_chatroom(ChatRoomID)
     end,
 
     RoomsInfo = lists:map(F, Rooms),
@@ -368,13 +368,13 @@ handle_cast({get_notes, ParsedJson, FromSocket}, State) ->
         false -> meh;
         true ->
             FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
-            ChatRoomId      = maps:get(chatroom_id, ParsedJson),
-            case find_notes(ChatRoomId) of
+            ChatRoomID      = maps:get(chatroom_id, ParsedJson),
+            case find_notes(ChatRoomID) of
 
                 no_notes ->
                     messaging:send_message(FromSocket, FromPhoneNumber,
                         jsx:encode(#{
-                            <<"chatroom_id">> => ChatRoomId,
+                            <<"chatroom_id">> => ChatRoomID,
                             <<"notes">> => [],
                             <<"type">> => <<"GET_NOTES">>
                     }));
@@ -383,7 +383,7 @@ handle_cast({get_notes, ParsedJson, FromSocket}, State) ->
                     io:format("~p~n", [FoundNotes]),
                     messaging:send_message(FromSocket, FromPhoneNumber,
                         jsx:encode(#{
-                            <<"chatroom_id">> => ChatRoomId,
+                            <<"chatroom_id">> => ChatRoomID,
                             <<"notes">> => FoundNotes,
                             <<"type">> => <<"GET_NOTES">>
                     }))
@@ -443,8 +443,98 @@ handle_cast({delete_note, ParsedJson, FromSocket}, State) ->
             end
     end,
 
-    {noreply, State}.
+    {noreply, State};
 
+handle_cast({create_event, ParsedJson, FromSocket}, State) ->
+
+    case room_check(ParsedJson, FromSocket, <<"CREATE_EVENT">>) of
+        false -> meh;
+        true ->
+            FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
+            case create_event(ParsedJson) of
+                {ok, event_created, EventID} ->
+                    messaging:send_status_queue(FromSocket, FromPhoneNumber, 1, <<"CREATE_EVENT">>, #{<<"event_id">> => EventID});
+                create_note_error ->
+                    messaging:send_status_queue(FromSocket, FromPhoneNumber, 3, <<"CREATE_EVENT">>)
+
+            end
+    end,
+    {noreply, State};
+
+handle_cast({get_events, ParsedJson, FromSocket}, State) ->
+
+    case room_check(ParsedJson, FromSocket, <<"GET_EVENTS">>) of
+
+        false -> meh;
+        true ->
+
+            FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
+            ChatRoomID = maps:get(chatroom_id, ParsedJson),
+
+            case find_events(ChatRoomID) of
+
+                no_events ->
+                    messaging:send_message(FromSocket, FromPhoneNumber,
+                        jsx:encode(#{
+                            <<"chatroom_id">> => ChatRoomID,
+                            <<"events">> => [],
+                            <<"type">> => <<"GET_EVENTS">>
+                    }));
+                FoundEvents ->
+                    io:format("~p~n", [FoundEvents]),
+                    messaging:send_message(FromSocket, FromPhoneNumber,
+                        jsx:encode(#{
+                            <<"chatroom_id">> => ChatRoomID,
+                            <<"events">> => FoundEvents,
+                            <<"type">> => <<"GET_EVENTS">>
+                    }))
+            end
+    end,
+    {noreply, State};
+
+handle_cast({vote_event, ParsedJson, FromSocket}, State) ->
+
+    case room_check(ParsedJson, FromSocket, <<"EVENT_VOTE">>) of
+        false -> meh;
+        true  ->
+            io:format("test!~n", []),
+            FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
+            EventID = maps:get(event_id, ParsedJson),
+
+            case vote_event(ParsedJson) of
+
+                vote_already_cast ->
+                    messaging:send_status_queue(FromSocket, FromPhoneNumber, 9, <<"EVENT_VOTE">>, #{<<"chatroom_id">> => EventID});
+                ok ->
+                    messaging:send_status_queue(FromSocket, FromPhoneNumber, 1, <<"EVENT_VOTE">>, #{<<"chatroom_id">> => EventID});
+                _ -> 
+                    messaging:send_status_queue(FromSocket, FromPhoneNumber, 3, <<"EVENT_VOTE">>, #{<<"chatroom_id">> => EventID})
+            end
+
+    end,
+    {noreply, State};
+
+handle_cast({unvote_event, ParsedJson, FromSocket}, State) ->
+
+    case room_check(ParsedJson, FromSocket, <<"EVENT_VOTE">>) of
+        false -> meh;
+        true  ->
+
+            FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
+            EventID = maps:get(event_id, ParsedJson),
+
+            case unvote_event(ParsedJson) of
+
+                vote_not_cast_yet ->
+                    messaging:send_status_queue(FromSocket, FromPhoneNumber, 9, <<"EVENT_UNVOTE">>, #{<<"chatroom_id">> => EventID});
+                ok ->
+                    messaging:send_status_queue(FromSocket, FromPhoneNumber, 1, <<"EVENT_UNVOTE">>, #{<<"chatroom_id">> => EventID});
+                _ -> 
+                    messaging:send_status_queue(FromSocket, FromPhoneNumber, 3, <<"EVENT_UNVOTE">>, #{<<"chatroom_id">> => EventID})
+            end
+
+    end,
+    {noreply, State}.
 
 %%%%%%%%%%%%%%%%%%%%%
 %%% Main functions
@@ -452,8 +542,8 @@ handle_cast({delete_note, ParsedJson, FromSocket}, State) ->
 
 room_check(ParsedJson, FromSocket, Type) ->
     FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
-    ChatRoomId      = maps:get(chatroom_id, ParsedJson),
-    Room = find_chatroom(ChatRoomId),
+    ChatRoomID      = maps:get(chatroom_id, ParsedJson),
+    Room = find_chatroom(ChatRoomID),
     case Room of
         no_such_room ->
             messaging:send_status_queue(FromSocket, FromPhoneNumber, 5, <<"GET_NOTES">>, <<"No such room">>),
@@ -473,7 +563,7 @@ send_chat_message(UserFound, ParsedJson, MessageID, FromSocket) ->
 
     FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
     Message         = maps:get(message, ParsedJson),
-    ChatRoomId      = maps:get(chatroom_id, ParsedJson),
+    ChatRoomID      = maps:get(chatroom_id, ParsedJson),
     TimeStamp       = maps:get(timestamp, ParsedJson),
     ToSocket        = maps:get(active_socket, UserFound),
     ToPhoneNumber   = maps:get(phone_number, UserFound),
@@ -482,7 +572,7 @@ send_chat_message(UserFound, ParsedJson, MessageID, FromSocket) ->
         jsx:encode(#{
         <<"message_id">>        => MessageID,
         <<"from_phone_number">> => FromPhoneNumber,
-        <<"chatroom_id">>       => ChatRoomId,
+        <<"chatroom_id">>       => ChatRoomID,
         <<"message">>           => Message,
         <<"timestamp">>         => TimeStamp,
         <<"type">>              => <<"TEXT_RECEIVED">>
@@ -498,14 +588,14 @@ send_chat_message(UserFound, ParsedJson, MessageID, FromSocket) ->
     end.
 
 
-send_chatroom_invitation(ChatRoomId, ChatRoomName, Users, Socket, PhoneNumber, Expiry, Type) ->
+send_chatroom_invitation(ChatRoomID, ChatRoomName, Users, Socket, PhoneNumber, Expiry, Type) ->
 
     if
         Type == group ->
 
             messaging:send_message(Socket, PhoneNumber,
                 jsx:encode(#{
-                    <<"chatroom_id">>   => ChatRoomId,
+                    <<"chatroom_id">>   => ChatRoomID,
                     <<"chatroom_name">> => ChatRoomName,
                     <<"users">>         => Users,
                     <<"type">>          => <<"ROOM_INVITATION">>,
@@ -517,7 +607,7 @@ send_chatroom_invitation(ChatRoomId, ChatRoomName, Users, Socket, PhoneNumber, E
 
             messaging:send_message(Socket, PhoneNumber,
                 jsx:encode(#{
-                    <<"chatroom_id">>   => ChatRoomId,
+                    <<"chatroom_id">>   => ChatRoomID,
                     <<"users">>         => Users,
                     <<"type">>          => <<"SINGLE_ROOM_INVITATION">>,
                     <<"expiry">>        => Expiry,
@@ -525,7 +615,7 @@ send_chatroom_invitation(ChatRoomId, ChatRoomName, Users, Socket, PhoneNumber, E
                 }))
     end,
 
-    add_room_to_user(ChatRoomId, PhoneNumber).
+    add_room_to_user(ChatRoomID, PhoneNumber).
 
 
 %% may need to write another version for just ChatRoomID
@@ -533,22 +623,22 @@ check_if_user_in_room(Room, PhoneNumber) ->
     User = find_user(PhoneNumber),
     not(maps:get(rooms, User) == undefined) andalso lists:member(maps:get(chatroom_id, Room), maps:get(rooms, User)) and lists:member(PhoneNumber, maps:get(room_users, Room)).
     
-add_room_to_user(ChatRoomId, PhoneNumber) ->
+add_room_to_user(ChatRoomID, PhoneNumber) ->
     User = find_user(PhoneNumber),
     Rooms = maps:get(rooms, User),
     case Rooms of
         undefined -> 
-            update_user(rooms, PhoneNumber, [ChatRoomId]);
+            update_user(rooms, PhoneNumber, [ChatRoomID]);
 
         ExistingRooms ->
-            AppendedRooms = lists:append(ExistingRooms, [ChatRoomId]),
+            AppendedRooms = lists:append(ExistingRooms, [ChatRoomID]),
             update_user(rooms, PhoneNumber, AppendedRooms)
     end.
 
-remove_room_from_user(ChatRoomId, PhoneNumber) ->
+remove_room_from_user(ChatRoomID, PhoneNumber) ->
     User = find_user(PhoneNumber),
     Rooms = maps:get(rooms, User),
-    UpdatedRooms = lists:delete(ChatRoomId, Rooms),
+    UpdatedRooms = lists:delete(ChatRoomID, Rooms),
     update_user(rooms, PhoneNumber, UpdatedRooms).
 
 add_user_to_room(Room, PhoneNumber) ->
@@ -650,9 +740,9 @@ chat_message_delivery_receipt(ToPhoneNumber, Message) ->
             nothing_happens
     end.
 
-check_if_user_admin(PhoneNumber, ChatRoomId) ->
+check_if_user_admin(PhoneNumber, ChatRoomID) ->
 
-    Room = find_chatroom(ChatRoomId),
+    Room = find_chatroom(ChatRoomID),
     RoomAdmin = maps:get(admin_user, Room),
 
     case RoomAdmin == PhoneNumber of
@@ -786,32 +876,32 @@ create_chatroom(ParsedJson) ->
     Group        = maps:get(group, ParsedJson, true),
     Expiry       = maps:get(expiry, ParsedJson),
 
-    ChatRoomId   = timestamp_now(),
+    ChatRoomID   = timestamp_now(),
 
     F = fun() ->
-        Status = mnesia:write(#aurora_chatrooms{chatroom_id   = ChatRoomId,
+        Status = mnesia:write(#aurora_chatrooms{chatroom_id   = ChatRoomID,
                                                 admin_user    = AdminUser,
                                                 chatroom_name = ChatRoomName,
                                                 group         = Group,
                                                 expiry        = Expiry,
                                                 room_users    = Users}),
         case Status of
-            ok -> {ok, room_created, ChatRoomId, ChatRoomName, Users, Expiry};
+            ok -> {ok, room_created, ChatRoomID, ChatRoomName, Users, Expiry};
             _  -> error
         end
 
     end,
     mnesia:activity(transaction, F).
 
-find_chatroom(ChatRoomId) ->
+find_chatroom(ChatRoomID) ->
 
     F = fun() ->
-        case mnesia:read({aurora_chatrooms, ChatRoomId}) of
+        case mnesia:read({aurora_chatrooms, ChatRoomID}) of
             [#aurora_chatrooms{chatroom_name = ChatRoomName,
                                room_users    = RoomUsers,
                                admin_user    = AdminUser}] ->
 
-                #{chatroom_id   => ChatRoomId,
+                #{chatroom_id   => ChatRoomID,
                   chatroom_name => ChatRoomName,
                   room_users    => RoomUsers,
                   admin_user    => AdminUser};
@@ -822,17 +912,17 @@ find_chatroom(ChatRoomId) ->
     end,
     mnesia:activity(transaction, F).
 
-update_chatroom(change_room_users, ChatRoomId, Users) ->
+update_chatroom(change_room_users, ChatRoomID, Users) ->
     F = fun() ->
-        [ExistingRoom] = mnesia:wread({aurora_chatrooms, ChatRoomId}),
+        [ExistingRoom] = mnesia:wread({aurora_chatrooms, ChatRoomID}),
         UpdatedRoom = ExistingRoom#aurora_chatrooms{room_users = Users},
         mnesia:write(UpdatedRoom)
     end,
     mnesia:activity(transaction, F);
 
-update_chatroom(change_admin, ChatRoomId, NewAdmin) ->
+update_chatroom(change_admin, ChatRoomID, NewAdmin) ->
     F = fun() ->
-        [ExistingRoom] = mnesia:wread({aurora_chatrooms, ChatRoomId}),
+        [ExistingRoom] = mnesia:wread({aurora_chatrooms, ChatRoomID}),
         UpdatedRoom = ExistingRoom#aurora_chatrooms{admin_user = NewAdmin},
         mnesia:write(UpdatedRoom)
     end,
@@ -879,14 +969,14 @@ append_backlog(PhoneNumber, Message) ->
 
 create_chat_message(ParsedJson) ->
     
-    ChatRoomId = maps:get(chatroom_id, ParsedJson),
+    ChatRoomID = maps:get(chatroom_id, ParsedJson),
     FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
     Message = maps:get(message, ParsedJson),
     TimeStamp = maps:get(timestamp, ParsedJson),
     ChatMessageID = timestamp_now(),
 
     F = fun() ->
-        Status = mnesia:write(#aurora_chat_messages{chatroom_id       = ChatRoomId,
+        Status = mnesia:write(#aurora_chat_messages{chatroom_id       = ChatRoomID,
                                                     from_phone_number = FromPhoneNumber,
                                                     message           = Message,
                                                     timestamp         = TimeStamp,
@@ -898,15 +988,15 @@ create_chat_message(ParsedJson) ->
     end,
     mnesia:activity(transaction, F).
 
-find_notes(ChatRoomId) ->
+find_notes(ChatRoomID) ->
     F = fun() ->
-        case mnesia:match_object({aurora_notes, '_', ChatRoomId, '_', '_', '_'}) of
+        case mnesia:match_object({aurora_notes, '_', ChatRoomID, '_', '_', '_'}) of
             [] ->
                 no_notes;
             Notes ->
                 F = fun(Note) ->
-                    {aurora_notes, NoteID, ChatRoomId, NoteTitle, NoteText, FromPhoneNumber} = Note,
-                    #{note_id => NoteID, chatroom_id => ChatRoomId, note_title => NoteTitle, note_text => NoteText, from_phone_number => FromPhoneNumber}
+                    {aurora_notes, NoteID, ChatRoomID, NoteTitle, NoteText, FromPhoneNumber} = Note,
+                    #{note_id => NoteID, chatroom_id => ChatRoomID, note_title => NoteTitle, note_text => NoteText, from_phone_number => FromPhoneNumber}
                 end,
                 lists:map(F, Notes)
         end
@@ -920,7 +1010,7 @@ create_note(ParsedJson) ->
     NoteTitle       = maps:get(note_title, ParsedJson),
     NoteText        = maps:get(note_text, ParsedJson),
     FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
-    ChatRoomId      = maps:get(chatroom_id, ParsedJson),
+    ChatRoomID      = maps:get(chatroom_id, ParsedJson),
 
     F = fun() ->
 
@@ -928,7 +1018,7 @@ create_note(ParsedJson) ->
                                             note_title        = NoteTitle,
                                             note_text         = NoteText,
                                             from_phone_number = FromPhoneNumber,
-                                            chatroom_id       = ChatRoomId}),
+                                            chatroom_id       = ChatRoomID}),
 
         case Status of
             ok -> {ok, note_created, NoteID};
@@ -957,6 +1047,92 @@ delete_note(ParsedJson) ->
 
     F = fun() ->
         mnesia:delete({aurora_notes, NoteID})
+    end,
+    mnesia:activity(transaction, F).
+
+create_event(ParsedJson) ->
+    
+    EventID    = timestamp_now(),
+    EventName  = maps:get(event_name, ParsedJson),
+    ChatRoomID = maps:get(chatroom_id, ParsedJson),
+
+    F = fun() ->
+
+        Status = mnesia:write(#aurora_events{event_id   = EventID, 
+                                            event_name  = EventName,
+                                            votes       = [],
+                                            chatroom_id = ChatRoomID}),
+
+        case Status of
+            ok -> {ok, event_created, EventID};
+            _  -> create_event_error
+        end
+    end,
+    mnesia:activity(transaction, F).
+
+% find_event(EventID) ->
+
+%     F = fun() ->
+%         case mnesia:read({aurora_events, EventID}) of
+%             [#aurora_events{chatroom_id = ChatRoomID, event_name = EventName, votes = Votes}] ->
+%                 #{event_id => EventID, chatroom_id => ChatRoomID, event_name => EventName, votes => Votes};
+%             _ ->
+%                 no_such_event
+%         end
+%     end,
+%     mnesia:activity(transaction, F).
+
+find_events(ChatRoomID) ->
+    F = fun() ->
+        case mnesia:match_object({aurora_events, '_', ChatRoomID, '_', '_'}) of
+            [] ->
+                no_events;
+            Events ->
+                F = fun(Event) ->
+                    {aurora_events, EventID, ChatRoomID, EventName, Votes} = Event,
+                    #{event_id => EventID, chatroom_id => ChatRoomID, event_name => EventName, votes => Votes}
+                end,
+                lists:map(F, Events)
+        end
+    end,
+    mnesia:activity(transaction, F).
+
+vote_event(ParsedJson) ->
+
+    EventID         = maps:get(event_id, ParsedJson),
+    FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
+
+    F = fun() ->
+
+        [ExistingEvent] = mnesia:wread({aurora_events, EventID}),
+        {aurora_events, _, _, _, Votes} = ExistingEvent,
+        case lists:member(FromPhoneNumber, Votes) of
+            true -> vote_already_cast;
+            false ->
+                io:format("here!~n", []),
+                UpdatedVotes = lists:append(Votes, [FromPhoneNumber]),
+                UpdatedEvent = ExistingEvent#aurora_events{votes = UpdatedVotes},
+                mnesia:write(UpdatedEvent)
+        end
+    end,
+    mnesia:activity(transaction, F).
+
+unvote_event(ParsedJson) ->
+
+    EventID         = maps:get(event_id, ParsedJson),
+    FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
+
+    F = fun() ->
+        [ExistingEvent] = mnesia:wread({aurora_events, EventID}),
+        {aurora_events, _, _, _, Votes} = ExistingEvent,
+        case lists:member(FromPhoneNumber, Votes) of
+            false ->
+                vote_not_cast_yet;
+            true ->
+                UpdatedVotes = lists:delete(FromPhoneNumber, Votes),
+                UpdatedEvent = ExistingEvent#aurora_events{votes = UpdatedVotes},
+                mnesia:write(UpdatedEvent)
+        end
     end,
     mnesia:activity(transaction, F).
 

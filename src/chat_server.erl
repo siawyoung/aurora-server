@@ -183,14 +183,14 @@ connected_loop(Socket) ->
                                     gen_server:cast(controller, {get_events, ParsedJson, Socket}),
                                     connected_loop(Socket);
 
-                                <<"EDIT_EVENT">> ->
-                                    io:format("EDIT EVENT MESSAGE SENT~n", []),
-                                    gen_server:cast(controller, {edit_event, ParsedJson, Socket}),
+                                <<"EVENT_VOTE">> ->
+                                    io:format("EVENT VOTE MESSAGE SENT~n", []),
+                                    gen_server:cast(controller, {vote_event, ParsedJson, Socket}),
                                     connected_loop(Socket);
 
-                                <<"DELETE_EVENT">> ->
-                                    io:format("DELETE EVENT MESSAGE SENT~n", []),
-                                    gen_server:cast(controller, {delete_event, ParsedJson, Socket}),
+                                <<"EVENT_UNVOTE">> ->
+                                    io:format("EVENT UNVOTE MESSAGE SENT~n", []),
+                                    gen_server:cast(controller, {unvote_event, ParsedJson, Socket}),
                                     connected_loop(Socket)
 
                             end

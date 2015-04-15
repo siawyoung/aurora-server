@@ -300,7 +300,7 @@ validate_create_event_request(ParsedJson) ->
   
 
 validate_get_events_request(ParsedJson) ->
-  case validate_fields([from_phone_number, session_token, event_name, chatroom_id], ParsedJson) of
+  case validate_fields([from_phone_number, session_token, chatroom_id], ParsedJson) of
     true ->
         io:format("Message from validate_get_events_request: Invalid payload~n", []),
         invalid_request;
