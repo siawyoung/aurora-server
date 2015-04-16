@@ -505,6 +505,7 @@ handle_cast({vote_event, ParsedJson, FromSocket}, State) ->
                 vote_already_cast ->
                     messaging:send_status_queue(FromSocket, FromPhoneNumber, 9, <<"EVENT_VOTE">>, #{<<"chatroom_id">> => EventID});
                 ok ->
+                    send_vote_message_to_room(ParsedJson, EventID, <<"EVENT_VOTE_RECEIVED">>),
                     messaging:send_status_queue(FromSocket, FromPhoneNumber, 1, <<"EVENT_VOTE">>, #{<<"chatroom_id">> => EventID});
                 _ -> 
                     messaging:send_status_queue(FromSocket, FromPhoneNumber, 3, <<"EVENT_VOTE">>, #{<<"chatroom_id">> => EventID})
@@ -527,6 +528,7 @@ handle_cast({unvote_event, ParsedJson, FromSocket}, State) ->
                 vote_not_cast_yet ->
                     messaging:send_status_queue(FromSocket, FromPhoneNumber, 9, <<"EVENT_UNVOTE">>, #{<<"chatroom_id">> => EventID});
                 ok ->
+                    send_vote_message_to_room(ParsedJson, EventID, <<"EVENT_UNVOTE_RECEIVED">>),
                     messaging:send_status_queue(FromSocket, FromPhoneNumber, 1, <<"EVENT_UNVOTE">>, #{<<"chatroom_id">> => EventID});
                 _ -> 
                     messaging:send_status_queue(FromSocket, FromPhoneNumber, 3, <<"EVENT_UNVOTE">>, #{<<"chatroom_id">> => EventID})
@@ -557,6 +559,26 @@ room_check(ParsedJson, FromSocket, Type) ->
             end
     end.
 
+send_vote_message_to_room(ParsedJson, EventID, Type) ->
+
+    FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
+    ChatRoomID      = maps:get(chatroom_id, ParsedJson),
+    Room            = find_chatroom(ChatRoomID),
+    Users           = maps:get(room_users, Room),
+
+    F = fun(UserPhoneNumber) ->
+        FoundUser = find_user(UserPhoneNumber),
+        Socket = maps:get(active_socket, FoundUser),
+        messaging:send_message(Socket, UserPhoneNumber, jsx:encode(#{
+            <<"from_phone_number">> => FromPhoneNumber,
+            <<"chatroom_id">>       => ChatRoomID, 
+            <<"vote_timestamp">>    => timestamp_now(),
+            <<"event_id">>          => EventID,
+            <<"type">>              => Type
+            }))
+    end,
+
+    lists:foreach(F, Users).
 
 send_chat_message(UserFound, ParsedJson, MessageID, FromSocket) ->
 
@@ -585,7 +607,6 @@ send_chat_message(UserFound, ParsedJson, MessageID, FromSocket) ->
             % socket closed
             messaging:send_status_queue(FromSocket, FromPhoneNumber, 7, <<"TEXT">>, #{<<"message_id">> => MessageID, <<"to_phone_number">> => ToPhoneNumber})
     end.
-
 
 send_chatroom_invitation(ChatRoomID, ChatRoomName, Users, Socket, PhoneNumber, Expiry, Type) ->
 
