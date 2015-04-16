@@ -4,6 +4,8 @@
 
 validate_and_parse_auth(Socket, RawData) ->
 
+    io:format("This is the raw socket data:~n~p~n", [RawData]),
+
     case jsx:is_json(RawData) of
 
       false ->
@@ -38,6 +40,8 @@ validate_and_parse_auth(Socket, RawData) ->
 % 3) Not JSON           - Status 0
 
 validate_and_parse_request(RawData) ->
+
+  io:format("This is the raw socket data:~n~p~n", [RawData]),
 
   case jsx:is_json(RawData) of
 
