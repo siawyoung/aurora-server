@@ -10,7 +10,7 @@
 -record(aurora_chatrooms, {chatroom_id, chatroom_name, room_users, admin_user, expiry, group}).
 -record(aurora_message_backlog, {phone_number, messages}).
 -record(aurora_chat_messages, {chat_message_id, chatroom_id, from_phone_number, timestamp, message}).
--record(aurora_events, {event_id, chatroom_id, event_name, votes}).
+-record(aurora_events, {event_id, chatroom_id, event_name, event_datetime, votes}).
 -record(aurora_notes, {note_id, chatroom_id, note_title, note_text, from_phone_number}).
 
 start() ->
@@ -346,18 +346,31 @@ handle_cast({get_rooms, ParsedJson, FromSocket}, State) ->
     FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
     User = find_user(FromPhoneNumber),
     Rooms = maps:get(rooms, User),
+    case Rooms of
 
-    F = fun(ChatRoomID) ->
-        find_chatroom(ChatRoomID)
+        undefined ->
+
+            messaging:send_message(FromSocket, FromPhoneNumber,
+            jsx:encode(#{
+                <<"chatrooms">> => [],
+                <<"type">> => <<"GET_ROOMS">>
+            }));
+
+        _ ->
+
+            F = fun(ChatRoomID) ->
+                find_chatroom(ChatRoomID)
+            end,
+
+            RoomsInfo = lists:map(F, Rooms),
+
+            messaging:send_message(FromSocket, FromPhoneNumber,
+                jsx:encode(#{
+                    <<"chatrooms">> => RoomsInfo,
+                    <<"type">> => <<"GET_ROOMS">>
+            }))
+
     end,
-
-    RoomsInfo = lists:map(F, Rooms),
-
-    messaging:send_message(FromSocket, FromPhoneNumber,
-        jsx:encode(#{
-            <<"chatrooms">> => RoomsInfo,
-            <<"type">> => <<"GET_ROOMS">>
-    })),
     
     {noreply, State};
 
