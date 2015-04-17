@@ -1138,7 +1138,7 @@ vote_event(ParsedJson) ->
     F = fun() ->
 
         [ExistingEvent] = mnesia:wread({aurora_events, EventID}),
-        {aurora_events, _, _, _, Votes} = ExistingEvent,
+        {aurora_events, _, _, _, _, Votes} = ExistingEvent,
         case lists:member(FromPhoneNumber, Votes) of
             true -> vote_already_cast;
             false ->
@@ -1156,10 +1156,9 @@ unvote_event(ParsedJson) ->
 
     F = fun() ->
         [ExistingEvent] = mnesia:wread({aurora_events, EventID}),
-        {aurora_events, _, _, _, Votes} = ExistingEvent,
+        {aurora_events, _, _, _, _, Votes} = ExistingEvent,
         case lists:member(FromPhoneNumber, Votes) of
-            false ->
-                vote_not_cast_yet;
+            false -> vote_not_cast_yet;
             true ->
                 UpdatedVotes = lists:delete(FromPhoneNumber, Votes),
                 UpdatedEvent = ExistingEvent#aurora_events{votes = UpdatedVotes},
