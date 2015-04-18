@@ -68,7 +68,7 @@ validate_and_parse_request(RawData) ->
 
             <<"GET_USERS">> ->
               case validate_get_users_request(ParsedJson) of
-                invalid_request -> {missing_fields, <<"CREATE_ROOM">>};
+                invalid_request -> {missing_fields, <<"GET_USERS">>};
                 JsonWithCleanedList -> JsonWithCleanedList
               end;
 
