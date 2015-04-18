@@ -2,7 +2,6 @@
 
 -export([start/1, pre_connected_loop/1]).
 -export([install/1]).
-% -export([status_reply/2, status_reply/3, status_reply/4]).
 
 -record(aurora_users, {phone_number, username, session_token, rooms, current_ip, active_socket}).
 -record(aurora_chatrooms, {chatroom_id, chatroom_name, room_users, admin_user, expiry, group}).
@@ -12,7 +11,7 @@
 -record(aurora_notes, {note_id, chatroom_id, note_title, note_text, from_phone_number}).
 
 start(Port) ->
-    mnesia:wait_for_tables([aurora_users], 5000),
+    mnesia:wait_for_tables([aurora_users, aurora_chatrooms, aurora_message_backlog, aurora_chat_messages, aurora_events, aurora_notes], 5000),
     controller:start(),
     tcp_server:start(?MODULE, Port, {?MODULE, pre_connected_loop}).
 
@@ -98,11 +97,11 @@ connected_loop(Socket) ->
                     PhoneNumber = maps:get(from_phone_number, ParsedJson),
 
                     if 
-                        AuthorizedStatus =/= authorized ->
+                        % AuthorizedStatus =/= authorized ->
                             
-                            %% Session tokens don't match
-                            messaging:send_status_queue(Socket, PhoneNumber, 4, MessageType),
-                            connected_loop(Socket);
+                        %     %% Session tokens don't match
+                        %     messaging:send_status_queue(Socket, PhoneNumber, 4, MessageType),
+                        %     connected_loop(Socket);
 
                         true ->
 
