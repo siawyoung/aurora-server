@@ -171,36 +171,56 @@ handle_cast({create_single_chatroom, ParsedJson, FromSocket}, State) ->
     ToPhoneNumber = maps:get(to_phone_number, ParsedJson),
     InsertUsersAndGroupType = maps:merge(#{users => [FromPhoneNumber, ToPhoneNumber], group => false}, ParsedJson),
 
-    ValidateResult = validate_users([FromPhoneNumber,ToPhoneNumber]),
+    case find_chatroom(find_single_chatroom, FromPhoneNumber, ToPhoneNumber) of
 
-    case ValidateResult of
+        database_error ->
 
-        {ok, users_validated, UserInfo} ->
-    
-            DatabaseResult = create_chatroom(InsertUsersAndGroupType),
-            case DatabaseResult of
-                {ok, room_created, ChatRoomID, ChatRoomName, Users, Expiry} ->
+            messaging:send_status_queue(FromSocket, FromPhoneNumber, 3, <<"There seems to be multiple instances of this single chatroom. Please consult the administrator.">>);
 
-                    messaging:send_message(FromSocket, FromPhoneNumber, 
-                    jsx:encode(#{
-                        <<"status">>        => 1,
-                        <<"chatroom_id">>   => ChatRoomID,
-                        <<"type">>          => <<"CREATE_SINGLE_ROOM">>
-                    })),
+        no_such_room ->
 
-                    % send status to all users
-                    F = fun(User) ->
-                        send_chatroom_invitation(ChatRoomID, ChatRoomName, Users, maps:get(active_socket, User), maps:get(phone_number, User), Expiry, single)
-                    end,
-                    lists:foreach(F, UserInfo);
+            ValidateResult = validate_users([FromPhoneNumber,ToPhoneNumber]),
+
+            case ValidateResult of
+
+                {ok, users_validated, UserInfo} ->
+            
+                    DatabaseResult = create_chatroom(InsertUsersAndGroupType),
+                    case DatabaseResult of
+                        {ok, room_created, ChatRoomID, ChatRoomName, Users, Expiry} ->
+
+                            messaging:send_message(FromSocket, FromPhoneNumber, 
+                            jsx:encode(#{
+                                <<"status">>        => 1,
+                                <<"chatroom_id">>   => ChatRoomID,
+                                <<"type">>          => <<"CREATE_SINGLE_ROOM">>
+                            })),
+
+                            % send status to all users
+                            F = fun(User) ->
+                                send_chatroom_invitation(ChatRoomID, ChatRoomName, Users, maps:get(active_socket, User), maps:get(phone_number, User), Expiry, single)
+                            end,
+                            lists:foreach(F, UserInfo);
+
+                        error ->
+                            messaging:send_status_queue(FromSocket, FromPhoneNumber, 3, <<"CREATE_ROOM">>, <<"Database transaction error">>)
+                    end;
 
                 error ->
-                    messaging:send_status_queue(FromSocket, FromPhoneNumber, 3, <<"CREATE_ROOM">>, <<"Database transaction error">>)
+                    messaging:send_status_queue(FromSocket, FromPhoneNumber, 5, <<"CREATE_SINGLE_ROOM">>, <<"Some users are invalid">>)
             end;
 
-        error ->
-            messaging:send_status_queue(FromSocket, FromPhoneNumber, 5, <<"CREATE_SINGLE_ROOM">>, <<"Some users are invalid">>)
-    end,
+        FoundRoom ->
+
+            messaging:send_message(FromSocket, FromPhoneNumber,
+                jsx:encode(#{
+                    <<"chatroom_id">> => maps:get(chatroom_id, FoundRoom),
+                    <<"users">>       => maps:get(room_users, FoundRoom),
+                    <<"expiry">>      => maps:get(expiry, FoundRoom),
+                    <<"group">>       => false,
+                    <<"type">>        => <<"ROOM_INVITATION">>
+                }))
+        end,
 
     {noreply, State};
 
@@ -927,6 +947,58 @@ create_chatroom(ParsedJson) ->
 
     end,
     mnesia:activity(transaction, F).
+
+find_chatroom(find_single_chatroom, PhoneNumber1, PhoneNumber2) ->
+
+    Permutation1 = [PhoneNumber1,PhoneNumber2],
+    Permutation2 = [PhoneNumber2,PhoneNumber1],
+
+    F = fun() ->
+        case mnesia:match_object({aurora_chatrooms, '_', '_', Permutation1, '_', '_', false}) of
+            [] ->
+                case mnesia:match_object({aurora_chatrooms, '_', '_', Permutation2, '_', '_', false}) of
+
+                    [] ->
+                        no_such_room;
+
+                    [#aurora_chatrooms{chatroom_id = ChatRoomID,
+                               chatroom_name = ChatRoomName,
+                               room_users    = RoomUsers,
+                               expiry        = Expiry,
+                               group         = Group,
+                               admin_user    = AdminUser}] -> 
+
+                        #{chatroom_id   => ChatRoomID,
+                          chatroom_name => ChatRoomName,
+                          room_users    => RoomUsers,
+                          expiry        => Expiry,
+                          group         => Group,
+                          admin_user    => AdminUser}
+                    end;
+
+            [#aurora_chatrooms{chatroom_id = ChatRoomID,
+                               chatroom_name = ChatRoomName,
+                               room_users    = RoomUsers,
+                               expiry        = Expiry,
+                               group         = Group,
+                               admin_user    = AdminUser}] -> 
+
+                #{chatroom_id   => ChatRoomID,
+                  chatroom_name => ChatRoomName,
+                  room_users    => RoomUsers,
+                  expiry        => Expiry,
+                  group         => Group,
+                  admin_user    => AdminUser};
+
+            _ ->
+                database_error
+                
+        end
+
+
+    end,
+    mnesia:activity(transaction, F).
+    
 
 find_chatroom(ChatRoomID) ->
 
