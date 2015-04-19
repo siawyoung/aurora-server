@@ -15,6 +15,10 @@ start(Port) ->
     controller:start(),
     tcp_server:start(?MODULE, Port, {?MODULE, pre_connected_loop}).
 
+% This function creates a new local Mnesia database with the following tables
+% {type, set} - the records are of type "set", meaning that all records must be unique
+% this helps to improve search performance drastically
+% {disc_copies, Nodes} - Write operations to a table replica of type disc_copies will write data to the disc copy as well as to the RAM copy of the table
 install(Nodes) ->
     ok = mnesia:create_schema(Nodes),
     rpc:multicall(Nodes, application, start, [mnesia]),
@@ -43,6 +47,8 @@ install(Nodes) ->
                          {disc_copies, Nodes},
                          {type, set}]).
 
+
+%% validation
 pre_connected_loop(Socket) ->
     case gen_tcp:recv(Socket, 0) of
 
@@ -107,7 +113,6 @@ connected_loop(Socket) ->
 
                             % we update the socket upon auth, but in case it changes
                             % we update the socket in every message, after successful authorization
-                            % TODO: after updating, send all backdated messages to this socket
                             cast_update_socket(ParsedJson, Socket),
                         
                             case MessageType of

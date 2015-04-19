@@ -312,6 +312,8 @@ handle_cast({transfer_admin, ParsedJson, FromSocket}, State) ->
         FoundRoom == no_such_room ->
             messaging:send_status_queue(FromSocket, FromPhoneNumber, 5, <<"TRANSFER_ADMIN">>, <<"No such room">>);
 
+        % notice the "true" idiom used here - this is the "else" of Erlang
+        % meaning that this branch will always be evaluated
         true ->
             case check_if_user_in_room(FoundRoom, FromPhoneNumber) and check_if_user_in_room(FoundRoom, ToPhoneNumber) of
                 false ->
@@ -932,11 +934,15 @@ find_chatroom(ChatRoomID) ->
         case mnesia:read({aurora_chatrooms, ChatRoomID}) of
             [#aurora_chatrooms{chatroom_name = ChatRoomName,
                                room_users    = RoomUsers,
+                               expiry        = Expiry,
+                               group         = Group,
                                admin_user    = AdminUser}] ->
 
                 #{chatroom_id   => ChatRoomID,
                   chatroom_name => ChatRoomName,
                   room_users    => RoomUsers,
+                  expiry        => Expiry,
+                  group         => Group,
                   admin_user    => AdminUser};
 
             _ ->
@@ -1002,11 +1008,11 @@ append_backlog(PhoneNumber, Message) ->
 
 create_chat_message(ParsedJson) ->
     
-    ChatRoomID = maps:get(chatroom_id, ParsedJson),
+    ChatRoomID      = maps:get(chatroom_id, ParsedJson),
     FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
-    Message = maps:get(message, ParsedJson),
-    TimeStamp = maps:get(timestamp, ParsedJson),
-    ChatMessageID = timestamp_now(),
+    Message         = maps:get(message, ParsedJson),
+    TimeStamp       = maps:get(timestamp, ParsedJson),
+    ChatMessageID   = timestamp_now(),
 
     F = fun() ->
         Status = mnesia:write(#aurora_chat_messages{chatroom_id       = ChatRoomID,
