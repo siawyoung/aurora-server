@@ -69,7 +69,7 @@ validate_and_parse_request(RawData) ->
             <<"AUTH">> -> wrong_message_type; %% Not supposed to have AUTH messages here
             <<"TEXT">> ->
               case validate_text_request(ParsedJson) of
-                valid_request   -> ParsedJson;
+                invalid_request   -> {missing_fields, <<"TEXT">>};
                 JsonWithCleanedList -> JsonWithCleanedList
               end;
 
