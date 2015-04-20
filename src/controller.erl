@@ -4,33 +4,37 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 -export([start/0]).
 
+% we export append_backlog so that messaging.erl can use it
 -export([append_backlog/2]).
 
+% here we define the fields for each Mnesia table
 -record(aurora_users, {phone_number, username, session_token, rooms, current_ip, active_socket}).
 -record(aurora_chatrooms, {chatroom_id, chatroom_name, room_users, admin_user, expiry, group}).
 -record(aurora_message_backlog, {phone_number, messages}).
--record(aurora_chat_messages, {chat_message_id, chatroom_id, from_phone_number, timestamp, message}).
+-record(aurora_chat_messages, {chat_message_id, chatroom_id, from_phone_number, timestamp, message, tags}).
 -record(aurora_events, {event_id, chatroom_id, event_name, event_datetime, votes}).
 -record(aurora_notes, {note_id, chatroom_id, note_title, note_text, from_phone_number}).
 
 start() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
-% This is called when a connection is made to the server
+% Look ma, no state!
 init([]) ->
     State = [],
     {ok, State}.
 
+% handles the synchronous register call when registering a user
 handle_call({register, ParsedJson, Socket}, _From, State) ->
     PhoneNumber  = maps:get(from_phone_number, ParsedJson),
 
+    % check if user already exists in the database
     case user_exists(PhoneNumber) of
 
         user_exists ->
             
+            % if it exists, we update the socket and send the user's backlog
             Status = update_user(full_update, ParsedJson, Socket),
             case Status of
-                % return value from update_user mnesia database transaction
                 ok ->
                     messaging:send_status_queue(Socket, PhoneNumber, 1, <<"AUTH">>),
                     send_backlog(ParsedJson, Socket),
@@ -41,6 +45,7 @@ handle_call({register, ParsedJson, Socket}, _From, State) ->
             end;
 
         no_such_user ->
+            % if the user doesn't exist, we create the user
             Status = create_user(ParsedJson, Socket),
             case Status of
                 ok ->
@@ -52,12 +57,13 @@ handle_call({register, ParsedJson, Socket}, _From, State) ->
             end
     end;
     
-
+% handles the synchronous authorization call when authorizing each request
 handle_call({authorize_request, ParsedJson}, _From, State) ->
 
     TokenToCheck = maps:get(session_token, ParsedJson),
     PhoneNumber  = maps:get(from_phone_number, ParsedJson),
 
+    % first check if the user exists
     case find_user(PhoneNumber) of
         #{username     := _UserName, 
         session_token  := SessionToken, 
@@ -65,6 +71,7 @@ handle_call({authorize_request, ParsedJson}, _From, State) ->
         current_ip     := _IPaddress, 
         active_socket  := _Socket} ->
 
+            % then we need check if the tokens match
             case SessionToken == TokenToCheck of
                 true ->
                     {reply, authorized, State};
@@ -78,6 +85,11 @@ handle_call({authorize_request, ParsedJson}, _From, State) ->
 
     end.
 
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% FROM HERE ON LIES ONLY ASYNCHRONOUS GOODNESS
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% responds to TEXT requests
 handle_cast({send_chat_message, ParsedJson, FromSocket}, State) ->
 
     ChatRoomID = maps:get(chatroom_id, ParsedJson),
@@ -124,18 +136,22 @@ handle_cast({send_chat_message, ParsedJson, FromSocket}, State) ->
     {noreply, State};
 
 % update_socket shouldn't respond, even if it fails
-
 handle_cast({update_socket, ParsedJson, SocketToUpdate}, State) ->
 
     update_user(socket, ParsedJson, SocketToUpdate),
     send_backlog(ParsedJson, SocketToUpdate),
     {noreply, State};
 
+% responds to GET_USERS requests
+% Allows the client to send in an array of phone numbers
+% Returns the list of all users who are registered
 handle_cast({get_users, ParsedJson, FromSocket}, State) ->
 
     Users = maps:get(users, ParsedJson),
     FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
         
+    % define a functional object that runs find_user for each phone number
+    % to see if it belongs to an existing user
     F = fun(UserPhoneNumber) ->
 
         DatabaseResult = find_user(UserPhoneNumber),
@@ -155,6 +171,8 @@ handle_cast({get_users, ParsedJson, FromSocket}, State) ->
     end,
 
     AllUsers = lists:map(F, Users),
+
+    % filter out all users that do not exist
     FilteredUsers = lists:filter(fun(X) -> X =/= no_such_user end, AllUsers),
 
     messaging:send_message(FromSocket, FromPhoneNumber,
@@ -164,7 +182,9 @@ handle_cast({get_users, ParsedJson, FromSocket}, State) ->
             })),
     {noreply, State};
 
-
+% responds to CREATE_SINGLE_ROOM requests
+% we need to check if an existing single chatroom with the same person exists
+% because it is illegal to have multiple single chatrooms with the same person
 handle_cast({create_single_chatroom, ParsedJson, FromSocket}, State) ->
 
     FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
@@ -175,7 +195,7 @@ handle_cast({create_single_chatroom, ParsedJson, FromSocket}, State) ->
 
         database_error ->
 
-            messaging:send_status_queue(FromSocket, FromPhoneNumber, 3, <<"There seems to be multiple instances of this single chatroom. Please consult the administrator.">>);
+            messaging:send_status_queue(FromSocket, FromPhoneNumber, 3, <<"CREATE_SINGLE_ROOM">>, <<"There seems to be multiple instances of this single chatroom. Please consult the administrator.">>);
 
         no_such_room ->
 
@@ -203,7 +223,7 @@ handle_cast({create_single_chatroom, ParsedJson, FromSocket}, State) ->
                             lists:foreach(F, UserInfo);
 
                         error ->
-                            messaging:send_status_queue(FromSocket, FromPhoneNumber, 3, <<"CREATE_ROOM">>, <<"Database transaction error">>)
+                            messaging:send_status_queue(FromSocket, FromPhoneNumber, 3, <<"CREATE_SINGLE_ROOM">>, <<"Database transaction error">>)
                     end;
 
                 error ->
@@ -224,6 +244,8 @@ handle_cast({create_single_chatroom, ParsedJson, FromSocket}, State) ->
 
     {noreply, State};
 
+
+% Responds to CREATE_ROOM requests
 handle_cast({create_chatroom, ParsedJson, FromSocket}, State) ->
 
     FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
@@ -239,7 +261,6 @@ handle_cast({create_chatroom, ParsedJson, FromSocket}, State) ->
             case DatabaseResult of
                 {ok, room_created, ChatRoomID, ChatRoomName, Users, Expiry} ->
 
-                    % no need to abtract out yet??
                     messaging:send_message(FromSocket, FromPhoneNumber, 
                     jsx:encode(#{
                         <<"status">>        => 1,
@@ -247,7 +268,7 @@ handle_cast({create_chatroom, ParsedJson, FromSocket}, State) ->
                         <<"type">>          => <<"CREATE_ROOM">>
                     })),
 
-                    % send status to all users
+                    % send ROOM_INVITATION message to all invited users
                     F = fun(User) ->
                         send_chatroom_invitation(ChatRoomID, ChatRoomName, Users, maps:get(active_socket, User), maps:get(phone_number, User), Expiry, group)
                     end,
@@ -262,6 +283,9 @@ handle_cast({create_chatroom, ParsedJson, FromSocket}, State) ->
     end,
     {noreply, State};
 
+% responds to ROOM_INVITATION message
+% invite a user into an existing chatroom
+% only admins can invite
 handle_cast({room_invitation, ParsedJson, FromSocket}, State) ->
     
     FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
@@ -293,9 +317,11 @@ handle_cast({room_invitation, ParsedJson, FromSocket}, State) ->
     end,
     {noreply, State};
 
+% responds to LEAVE_ROOM requests
+% check if user is part of room and if he or she is the admin of the room
 handle_cast({leave_room, ParsedJson, FromSocket}, State) ->
 
-    case room_check(ParsedJson, FromSocket, <<"EDIT_NOTE">>) of
+    case room_check(ParsedJson, FromSocket, <<"LEAVE_ROOM">>) of
 
         false -> meh;
         true ->
@@ -310,12 +336,12 @@ handle_cast({leave_room, ParsedJson, FromSocket}, State) ->
                 remove_user_from_room(Room, FromPhoneNumber),
                 messaging:send_status_queue(FromSocket, FromPhoneNumber, 1, <<"LEAVE_ROOM">>, #{<<"chatroom_id">> => ChatRoomID});
             user_is_admin -> 
-                messaging:send_status_queue(FromSocket, FromPhoneNumber, 8, <<"ROOM_INVITATION">>, <<"User is the admin of the room. Admins cannot leave the room until they transfer admin rights.">>)
+                messaging:send_status_queue(FromSocket, FromPhoneNumber, 8, <<"LEAVE_ROOM">>, <<"User is the admin of the room. Admins cannot leave the room until they transfer admin rights.">>)
             end
     end,
     {noreply, State};
 
-
+% responds to TRANSFER_ADMIN request
 handle_cast({transfer_admin, ParsedJson, FromSocket}, State) ->
 
     FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
@@ -362,7 +388,8 @@ handle_cast({transfer_admin, ParsedJson, FromSocket}, State) ->
 
     {noreply, State};
 
-
+% responds to GET_ROOMS request
+% returns a list of all rooms belonging to a user
 handle_cast({get_rooms, ParsedJson, FromSocket}, State) ->
 
     FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
@@ -370,6 +397,7 @@ handle_cast({get_rooms, ParsedJson, FromSocket}, State) ->
     Rooms = maps:get(rooms, User),
     case Rooms of
 
+        % if the user has no rooms, an empty list is returned
         undefined ->
 
             messaging:send_message(FromSocket, FromPhoneNumber,
@@ -396,9 +424,11 @@ handle_cast({get_rooms, ParsedJson, FromSocket}, State) ->
     
     {noreply, State};
 
+% responds to GET_NOTES request
+% returns a list of all notes belonging to a user
 handle_cast({get_notes, ParsedJson, FromSocket}, State) ->
 
-    case room_check(ParsedJson, FromSocket, <<"EDIT_NOTE">>) of
+    case room_check(ParsedJson, FromSocket, <<"GET_NOTES">>) of
 
         false -> meh;
         true ->
@@ -427,9 +457,10 @@ handle_cast({get_notes, ParsedJson, FromSocket}, State) ->
     end,
     {noreply, State};
 
+% responds to CREATE_NOTE request
 handle_cast({create_note, ParsedJson, FromSocket}, State) ->
 
-    case room_check(ParsedJson, FromSocket, <<"EDIT_NOTE">>) of
+    case room_check(ParsedJson, FromSocket, <<"CREATE_NOTE">>) of
 
         false -> meh;
         true ->
@@ -444,6 +475,7 @@ handle_cast({create_note, ParsedJson, FromSocket}, State) ->
     end,
     {noreply, State};
 
+% responds to EDIT_NOTE request
 handle_cast({edit_note, ParsedJson, FromSocket}, State) ->
 
     case room_check(ParsedJson, FromSocket, <<"EDIT_NOTE">>) of
@@ -461,10 +493,10 @@ handle_cast({edit_note, ParsedJson, FromSocket}, State) ->
     end,
     {noreply, State};
 
-
+% responds to DELETE_NOTE request
 handle_cast({delete_note, ParsedJson, FromSocket}, State) ->
 
-    case room_check(ParsedJson, FromSocket, <<"EDIT_NOTE">>) of
+    case room_check(ParsedJson, FromSocket, <<"DELETE_NOTE">>) of
 
         false -> meh;
         true ->
@@ -480,6 +512,7 @@ handle_cast({delete_note, ParsedJson, FromSocket}, State) ->
 
     {noreply, State};
 
+% responds to CREATE_EVENT request
 handle_cast({create_event, ParsedJson, FromSocket}, State) ->
 
     case room_check(ParsedJson, FromSocket, <<"CREATE_EVENT">>) of
@@ -496,6 +529,7 @@ handle_cast({create_event, ParsedJson, FromSocket}, State) ->
     end,
     {noreply, State};
 
+% responds to GET_EVENTS request
 handle_cast({get_events, ParsedJson, FromSocket}, State) ->
 
     case room_check(ParsedJson, FromSocket, <<"GET_EVENTS">>) of
@@ -527,6 +561,8 @@ handle_cast({get_events, ParsedJson, FromSocket}, State) ->
     end,
     {noreply, State};
 
+% responds to VOTE_EVENT request
+% users are able to place votes for events
 handle_cast({vote_event, ParsedJson, FromSocket}, State) ->
 
     case room_check(ParsedJson, FromSocket, <<"EVENT_VOTE">>) of
@@ -549,6 +585,8 @@ handle_cast({vote_event, ParsedJson, FromSocket}, State) ->
     end,
     {noreply, State};
 
+% responds to VOTE_EVENT request
+% as well as remove their vote for events
 handle_cast({unvote_event, ParsedJson, FromSocket}, State) ->
 
     case room_check(ParsedJson, FromSocket, <<"EVENT_VOTE">>) of
@@ -572,9 +610,14 @@ handle_cast({unvote_event, ParsedJson, FromSocket}, State) ->
     end,
     {noreply, State}.
 
-%%%%%%%%%%%%%%%%%%%%%
-%%% Main functions
-%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%% COMPOSITE HELPER FUNCTIONS
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% These functions are abstracted out from the above casts
+% For reusability's sake and/or easier reading
+% These functions form an intermediate abstraction layer
+% between handle_cast functions and the Mnesia private API below
 
 room_check(ParsedJson, FromSocket, Type) ->
     FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
@@ -623,6 +666,7 @@ send_chat_message(UserFound, ParsedJson, MessageID, FromSocket) ->
     TimeStamp       = maps:get(timestamp, ParsedJson),
     ToSocket        = maps:get(active_socket, UserFound),
     ToPhoneNumber   = maps:get(phone_number, UserFound),
+    Tags            = maps:get(tags, ParsedJson),
 
     Status = messaging:send_message(ToSocket, ToPhoneNumber,
         jsx:encode(#{
@@ -631,6 +675,7 @@ send_chat_message(UserFound, ParsedJson, MessageID, FromSocket) ->
         <<"chatroom_id">>       => ChatRoomID,
         <<"message">>           => Message,
         <<"timestamp">>         => TimeStamp,
+        <<"tags">>              => Tags,
         <<"type">>              => <<"TEXT_RECEIVED">>
         })),
 
@@ -672,8 +717,6 @@ send_chatroom_invitation(ChatRoomID, ChatRoomName, Users, Socket, PhoneNumber, E
 
     add_room_to_user(ChatRoomID, PhoneNumber).
 
-
-%% may need to write another version for just ChatRoomID
 check_if_user_in_room(Room, PhoneNumber) ->
     User = find_user(PhoneNumber),
     not(maps:get(rooms, User) == undefined) andalso lists:member(maps:get(chatroom_id, Room), maps:get(rooms, User)) and lists:member(PhoneNumber, maps:get(room_users, Room)).
@@ -700,7 +743,6 @@ add_user_to_room(Room, PhoneNumber) ->
     AppendedUsers = lists:append(maps:get(room_users, Room), [PhoneNumber]),
     update_chatroom(change_room_users, maps:get(chatroom_id, Room), AppendedUsers).
 
-
 remove_user_from_room(Room, PhoneNumber) ->
     UpdatedUsers = lists:delete(PhoneNumber, maps:get(room_users, Room)),
     update_chatroom(change_room_users, maps:get(chatroom_id, Room), UpdatedUsers).
@@ -710,7 +752,6 @@ validate_users(Users) ->
     F = fun(UserPhoneNumber) ->
 
         DatabaseResult = find_user(UserPhoneNumber),
-        io:format("~p~p~n", [UserPhoneNumber, DatabaseResult]),
         case DatabaseResult of
             #{username     := _UserName, 
             session_token  := _SessionToken, 
@@ -726,7 +767,6 @@ validate_users(Users) ->
     end,
 
     UserSockets = lists:map(F, Users),
-    io:format("validate_users debug message: ~p~n", [UserSockets]),
 
     case lists:member(no_such_user, UserSockets) of
         true ->
@@ -805,9 +845,17 @@ check_if_user_admin(PhoneNumber, ChatRoomID) ->
         false -> user_not_admin
     end.
 
-%%%%%%%%%%%%%%%%%%%%
-%%% Mnesia interface
-%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%
+%%% Private Mnesia API
+%%%%%%%%%%%%%%%%%%%%%%
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% These API is kept private for a number of reasons
+% Easier to debug database errors
+% and for security reasons as well
+% we can't allow any old function to modify the
+% database now, can we?
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 user_exists(PhoneNumber) ->
     F = fun() ->
@@ -1084,6 +1132,7 @@ create_chat_message(ParsedJson) ->
     FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
     Message         = maps:get(message, ParsedJson),
     TimeStamp       = maps:get(timestamp, ParsedJson),
+    Tags            = maps:get(tags, ParsedJson),
     ChatMessageID   = timestamp_now(),
 
     F = fun() ->
@@ -1091,6 +1140,7 @@ create_chat_message(ParsedJson) ->
                                                     from_phone_number = FromPhoneNumber,
                                                     message           = Message,
                                                     timestamp         = TimeStamp,
+                                                    tags              = Tags,
                                                     chat_message_id   = ChatMessageID}),
         case Status of
             ok -> {ok, chat_message_created, ChatMessageID};
@@ -1181,18 +1231,6 @@ create_event(ParsedJson) ->
     end,
     mnesia:activity(transaction, F).
 
-% find_event(EventID) ->
-
-%     F = fun() ->
-%         case mnesia:read({aurora_events, EventID}) of
-%             [#aurora_events{chatroom_id = ChatRoomID, event_name = EventName, votes = Votes}] ->
-%                 #{event_id => EventID, chatroom_id => ChatRoomID, event_name => EventName, votes => Votes};
-%             _ ->
-%                 no_such_event
-%         end
-%     end,
-%     mnesia:activity(transaction, F).
-
 find_events(ChatRoomID) ->
     F = fun() ->
         case mnesia:match_object({aurora_events, '_', ChatRoomID, '_', '_'}) of
@@ -1248,10 +1286,6 @@ unvote_event(ParsedJson) ->
 %%%%%%%%%%%%%%%%%%%%%%%%
 %%% Auxilliary functions
 %%%%%%%%%%%%%%%%%%%%%%%%
-
-% random_id_generator() -> 
-%     <<I:160/integer>> = crypto:hash(sha,term_to_binary({make_ref(), now()})), 
-%     erlang:integer_to_list(I, 16).
 
 timestamp_now() ->
     list_to_binary(integer_to_list(timestamp(now()))).

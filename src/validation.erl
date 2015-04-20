@@ -2,6 +2,9 @@
 
 -export([validate_and_parse_auth/2, validate_and_parse_request/1]).
 
+%% This validation method is used within pre_connected_loop
+%% The only type of message we accept is AUTH messages
+
 validate_and_parse_auth(Socket, RawData) ->
 
     io:format("This is the raw socket data:~n~p~n", [RawData]),
@@ -33,6 +36,10 @@ validate_and_parse_auth(Socket, RawData) ->
 
     end.
 
+%% This validation method is used within connected_loop
+%% Once a socket has authenticated successfully, it is not allowed
+%% to reauthenticate again
+
 %% Validation can fail in 3 manners:
 
 % 1) Wrong message type - Status 6
@@ -63,7 +70,7 @@ validate_and_parse_request(RawData) ->
             <<"TEXT">> ->
               case validate_text_request(ParsedJson) of
                 valid_request   -> ParsedJson;
-                invalid_request -> {missing_fields, <<"TEXT">>}
+                JsonWithCleanedList -> JsonWithCleanedList
               end;
 
             <<"GET_USERS">> ->
@@ -74,6 +81,7 @@ validate_and_parse_request(RawData) ->
 
             <<"CREATE_ROOM">> ->
               %% note that for all payloads involving lists, validation attempts to clean the list up
+              %% and convert the items in the list to binary strings
               %% that's why we return the payload, not an atom
               case validate_create_room_request(ParsedJson) of 
                 invalid_request -> {missing_fields, <<"CREATE_ROOM">>};
@@ -172,13 +180,14 @@ validate_and_parse_request(RawData) ->
 
 validate_text_request(ParsedJson) ->
   
-  case validate_fields([chatroom_id, session_token, from_phone_number, timestamp, message], ParsedJson) of
+  case validate_fields([chatroom_id, session_token, from_phone_number, timestamp, message, tags], ParsedJson) of
     true ->
         io:format("Message from validate_text_request: Invalid payload~n", []),
         invalid_request;
     false ->
+        Tags = maps:get(tags, ParsedJson),
         io:format("Message from validate_text_message: Valid payload~n", []),
-        valid_request
+        maps:put(tags, handle_list(Tags), ParsedJson) %% clean up the list of tags
   end.
 
 validate_get_users_request(ParsedJson) ->
@@ -323,9 +332,9 @@ validate_event_vote_request(ParsedJson) ->
         valid_request
   end.
 
-%%%%%%%%%%%%%%%%%%%%%
-% AUX
-%%%%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%%%%%%
+% AUXILLIARY FUNCTIONS
+%%%%%%%%%%%%%%%%%%%%%%
 
 validate_fields(Fields, ParsedJson) ->
 

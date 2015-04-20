@@ -6,7 +6,7 @@
 -record(aurora_users, {phone_number, username, session_token, rooms, current_ip, active_socket}).
 -record(aurora_chatrooms, {chatroom_id, chatroom_name, room_users, admin_user, expiry, group}).
 -record(aurora_message_backlog, {phone_number, messages}).
--record(aurora_chat_messages, {chat_message_id, chatroom_id, from_phone_number, timestamp, message}).
+-record(aurora_chat_messages, {chat_message_id, chatroom_id, from_phone_number, timestamp, message, tags}).
 -record(aurora_events, {event_id, chatroom_id, event_name, event_datetime, votes}).
 -record(aurora_notes, {note_id, chatroom_id, note_title, note_text, from_phone_number}).
 
@@ -78,7 +78,6 @@ connected_loop(Socket) ->
             case validation:validate_and_parse_request(Data) of
 
                 invalid_json ->
-                    % status_reply(Socket, 0),
                     messaging:send_status(Socket, 0),
                     connected_loop(Socket);
 
@@ -95,7 +94,9 @@ connected_loop(Socket) ->
                     connected_loop(Socket);
 
                 %% whatever type of message it was, it has been checked for correctness of payload so we can proceed safely from here onwards
-                %% We also convert lists to the correct format
+                %% all of the fields have been checked to be present
+                %% So we can avoid having to write our code in a more cumbersome manner
+                %% to handle missing fields
                 ParsedJson ->
 
                     AuthorizedStatus = call_authorize_request(ParsedJson),
@@ -118,9 +119,9 @@ connected_loop(Socket) ->
                             case MessageType of
 
                                 <<"TEXT">> ->
-                                    io:format("TEXT MESSAGE SENT~n",[]),
+                                    io:format("TEXT MESSAGE SENT~n",[]), % server console logging for debugging
                                     gen_server:cast(controller, {send_chat_message, ParsedJson, Socket}),
-                                    connected_loop(Socket);
+                                    connected_loop(Socket); % after the asynchronous cast is sent, continue looping
 
                                 <<"GET_USERS">> ->
                                     io:format("GET USERS MESSAGE SENT~n",[]),
