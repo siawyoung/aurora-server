@@ -1300,12 +1300,14 @@ create_event(ParsedJson) ->
     EventID    = timestamp_now(),
     EventName  = maps:get(event_name, ParsedJson),
     ChatRoomID = maps:get(chatroom_id, ParsedJson),
+    EventDateTime = maps:get(event_datetime, ParsedJson),
 
     F = fun() ->
 
         Status = mnesia:write(#aurora_events{event_id   = EventID, 
                                             event_name  = EventName,
                                             votes       = [],
+                                            event_datetime =  EventDateTime,
                                             chatroom_id = ChatRoomID}),
 
         case Status of
