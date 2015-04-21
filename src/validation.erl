@@ -69,8 +69,8 @@ validate_and_parse_request(RawData) ->
             <<"AUTH">> -> wrong_message_type; %% Not supposed to have AUTH messages here
             <<"TEXT">> ->
               case validate_text_request(ParsedJson) of
-                invalid_request   -> {missing_fields, <<"TEXT">>};
-                JsonWithCleanedList -> JsonWithCleanedList
+                valid_request   -> ParsedJson;
+                invalid_request -> {missing_fields, <<"TEXT">>}
               end;
 
             <<"GET_USERS">> ->
@@ -185,9 +185,12 @@ validate_text_request(ParsedJson) ->
         io:format("Message from validate_text_request: Invalid payload~n", []),
         invalid_request;
     false ->
-        Tags = maps:get(tags, ParsedJson),
-        io:format("Message from validate_text_message: Valid payload~n", []),
-        maps:put(tags, handle_list(Tags), ParsedJson) %% clean up the list of tags
+        % Tags = maps:get(tags, ParsedJson),
+        % io:format("Message from validate_text_message: Valid payload~n", []),
+        % maps:put(tags, handle_list(Tags), ParsedJson) %% clean up the list of tags
+
+        io:format("Message from validate_text_request: Valid payload~n", []),
+        valid_request
   end.
 
 validate_get_users_request(ParsedJson) ->

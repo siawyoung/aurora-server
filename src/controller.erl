@@ -238,7 +238,7 @@ handle_cast({create_single_chatroom, ParsedJson, FromSocket}, State) ->
                     <<"users">>       => maps:get(room_users, FoundRoom),
                     <<"expiry">>      => maps:get(expiry, FoundRoom),
                     <<"group">>       => false,
-                    <<"type">>        => <<"ROOM_INVITATION">>
+                    <<"type">>        => <<"SINGLE_ROOM_INVITATION">>
                 }))
         end,
 
@@ -303,22 +303,47 @@ handle_cast({room_invitation, ParsedJson, FromSocket}, State) ->
             messaging:send_status_queue(FromSocket, FromPhoneNumber, 5, <<"ROOM_INVITATION">>, <<"No such room">>);
         true ->
 
-            case check_if_user_admin(FromPhoneNumber, ChatRoomID) of
+            % if the user is already in the room, we cannot invite him, d'oh
+            case check_if_user_in_room(Room, ToPhoneNumber) of
 
-                user_is_admin ->
-                    ChatRoomName = maps:get(chatroom_name, Room),
-                    Expiry       = maps:get(expiry, Room),
-                    UpdatedUsers = add_user_to_room(Room, ToPhoneNumber),
-                    send_chatroom_invitation(ChatRoomID, ChatRoomName, UpdatedUsers, maps:get(active_socket, User), maps:get(phone_number, User), Expiry, group),
-                    messaging:send_status_queue(FromSocket, FromPhoneNumber, 1, <<"ROOM_INVITATION">>, <<"User invited successfully">>);
-                user_not_admin ->
-                    messaging:send_status_queue(FromSocket, FromPhoneNumber, 8, <<"ROOM_INVITATION">>, <<"User is not admin of the room">>)
+                false ->
+
+                    % and of course, we can't invite if the chat room is not a group chat room
+
+                    case maps:get(group, Room) of
+
+                        true ->
+
+                            % only admins can invite users
+                            case check_if_user_admin(FromPhoneNumber, ChatRoomID) of
+
+                                user_is_admin ->
+                                    ChatRoomName = maps:get(chatroom_name, Room),
+                                    Expiry       = maps:get(expiry, Room),
+                                    UpdatedUsers = add_user_to_room(Room, ToPhoneNumber),
+                                    send_chatroom_invitation(ChatRoomID, ChatRoomName, UpdatedUsers, maps:get(active_socket, User), maps:get(phone_number, User), Expiry, group),
+                                    messaging:send_status_queue(FromSocket, FromPhoneNumber, 1, <<"ROOM_INVITATION">>, <<"User invited successfully">>);
+                                user_not_admin ->
+                                    messaging:send_status_queue(FromSocket, FromPhoneNumber, 8, <<"ROOM_INVITATION">>, <<"User is not admin of the room">>)
+                            end;
+
+                        false ->
+
+                            messaging:send_status_queue(FromSocket, FromPhoneNumber, 5, <<"ROOM_INVITATION">>, <<"Cannot invite people into single chatroom">>)
+
+                        end;
+
+                true ->
+                    messaging:send_status_queue(FromSocket, FromPhoneNumber, 5, <<"ROOM_INVITATION">>, <<"User is already in the room">>)
             end
+
     end,
     {noreply, State};
 
 % responds to LEAVE_ROOM requests
 % check if user is part of room and if he or she is the admin of the room
+% unless the user is the only person left in the room, in which case the user will leave the room and
+% delete the chat room
 handle_cast({leave_room, ParsedJson, FromSocket}, State) ->
 
     case room_check(ParsedJson, FromSocket, <<"LEAVE_ROOM">>) of
@@ -336,7 +361,20 @@ handle_cast({leave_room, ParsedJson, FromSocket}, State) ->
                 remove_user_from_room(Room, FromPhoneNumber),
                 messaging:send_status_queue(FromSocket, FromPhoneNumber, 1, <<"LEAVE_ROOM">>, #{<<"chatroom_id">> => ChatRoomID});
             user_is_admin -> 
-                messaging:send_status_queue(FromSocket, FromPhoneNumber, 8, <<"LEAVE_ROOM">>, <<"User is the admin of the room. Admins cannot leave the room until they transfer admin rights.">>)
+
+                case length(maps:get(room_users, Room)) == 1 of
+
+                    true ->
+
+                        remove_room_from_user(ChatRoomID, FromPhoneNumber),
+                        remove_user_from_room(Room, FromPhoneNumber),
+                        delete_chatroom(ParsedJson),
+                        messaging:send_status_queue(FromSocket, FromPhoneNumber, 1, <<"LEAVE_ROOM">>, #{<<"chatroom_id">> => ChatRoomID});
+
+                    false ->
+
+                        messaging:send_status_queue(FromSocket, FromPhoneNumber, 8, <<"LEAVE_ROOM">>, <<"User is the admin of the room. Admins cannot leave the room until they transfer admin rights.">>)
+                end
             end
     end,
     {noreply, State};
@@ -1084,6 +1122,15 @@ update_chatroom(change_admin, ChatRoomID, NewAdmin) ->
         [ExistingRoom] = mnesia:wread({aurora_chatrooms, ChatRoomID}),
         UpdatedRoom = ExistingRoom#aurora_chatrooms{admin_user = NewAdmin},
         mnesia:write(UpdatedRoom)
+    end,
+    mnesia:activity(transaction, F).
+
+delete_chatroom(ParsedJson) ->
+
+    ChatRoomID = maps:get(chatroom_id, ParsedJson),
+
+    F = fun() ->
+        mnesia:delete({aurora_chatrooms, ChatRoomID})
     end,
     mnesia:activity(transaction, F).
 
