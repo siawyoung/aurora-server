@@ -165,7 +165,6 @@ handle_cast({get_users, ParsedJson, FromSocket}, State) ->
     F = fun(UserPhoneNumber) ->
 
         DatabaseResult = find_user(UserPhoneNumber),
-        io:format("~p~p~n", [UserPhoneNumber, DatabaseResult]),
         case DatabaseResult of
             #{username     := UserName,
             session_token  := _SessionToken, 
@@ -1040,7 +1039,7 @@ create_chatroom(ParsedJson) ->
                                                 chatroom_name = ChatRoomName,
                                                 group         = Group,
                                                 expiry        = Expiry,
-                                                room_users    = Users}),
+                                                users    = Users}),
         case Status of
             ok -> {ok, room_created, ChatRoomID, ChatRoomName, Users, Expiry};
             _  -> error
