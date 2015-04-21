@@ -574,7 +574,7 @@ handle_cast({create_event, ParsedJson, FromSocket}, State) ->
             case create_event(ParsedJson) of
                 {ok, event_created, EventID} ->
                     messaging:send_status_queue(FromSocket, FromPhoneNumber, 1, <<"CREATE_EVENT">>, #{<<"event_id">> => EventID}),
-                    send_vote_creation_to_room(ParsedJson, maps:get(event_name, ParsedJson), EventID);
+                    send_vote_creation_to_room(ParsedJson, maps:get(event_name, ParsedJson), EventID, maps:get(event_datetime, ParsedJson));
                 create_note_error ->
                     messaging:send_status_queue(FromSocket, FromPhoneNumber, 3, <<"CREATE_EVENT">>)
 
@@ -690,7 +690,7 @@ room_check(ParsedJson, FromSocket, Type) ->
             end
     end.
 
-send_vote_creation_to_room(ParsedJson, EventName, EventID) ->
+send_vote_creation_to_room(ParsedJson, EventName, EventID, EventDateTime) ->
 
     ChatRoomID      = maps:get(chatroom_id, ParsedJson),
     Room            = find_chatroom(ChatRoomID),
@@ -703,6 +703,7 @@ send_vote_creation_to_room(ParsedJson, EventName, EventID) ->
             <<"chatroom_id">>       => ChatRoomID, 
             <<"event_name">>        => EventName,
             <<"event_id">>          => EventID,
+            <<"event_datetime">>    => EventDateTime,
             <<"type">>              => <<"EVENT_CREATED">>
             }))
     end,
