@@ -1382,13 +1382,13 @@ check_if_chatroom_expired(Room) ->
 
     Expiry = binary_to_number(maps:get(expiry, Room)),
     io:format("This chat room's expiry is:~p~n", [Expiry]),    
-    Expiry =< TimeNow.
+    Expiry =/= 0 andalso Expiry =< TimeNow .
 
 remove_expired_chatrooms() ->
     
     TimeNow = timestamp(now()) / 1000,
     io:format("The time now is:~p~n", [TimeNow]),
-    Match = ets:fun2ms(fun(N = #aurora_chatrooms{expiry = E}) when E =< TimeNow -> N end),
+    Match = ets:fun2ms(fun(N = #aurora_chatrooms{expiry = E}) when (E =/= 0 andalso E =< TimeNow) -> N end),
     io:format("These chatrooms are marked for deletion:~n~p~n", [Match]),
 
 
