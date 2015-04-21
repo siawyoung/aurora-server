@@ -129,12 +129,12 @@ connected_loop(Socket) ->
                                     connected_loop(Socket);
 
                                 <<"CREATE_SINGLE_ROOM">> ->
-                                    io:format("CREATE_ROOM MESSAGE SENT~n",[]),
+                                    io:format("CREATE_SINGLE_ROOM MESSAGE SENT~n",[]),
                                     gen_server:cast(controller, {create_single_chatroom, ParsedJson, Socket}),
                                     connected_loop(Socket);
 
                                 <<"CREATE_ROOM">> ->
-                                    io:format("CREATE SINGLE ROOM MESSAGE SENT~n",[]),
+                                    io:format("CREATE_ROOM MESSAGE SENT~n",[]),
                                     gen_server:cast(controller, {create_chatroom, ParsedJson, Socket}),
                                     connected_loop(Socket);
 
