@@ -573,7 +573,8 @@ handle_cast({create_event, ParsedJson, FromSocket}, State) ->
             FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
             case create_event(ParsedJson) of
                 {ok, event_created, EventID} ->
-                    messaging:send_status_queue(FromSocket, FromPhoneNumber, 1, <<"CREATE_EVENT">>, #{<<"event_id">> => EventID});
+                    messaging:send_status_queue(FromSocket, FromPhoneNumber, 1, <<"CREATE_EVENT">>, #{<<"event_id">> => EventID}),
+                    send_vote_creation_to_room(ParsedJson, maps:get(event_name, ParsedJson), EventID);
                 create_note_error ->
                     messaging:send_status_queue(FromSocket, FromPhoneNumber, 3, <<"CREATE_EVENT">>)
 
@@ -689,12 +690,32 @@ room_check(ParsedJson, FromSocket, Type) ->
             end
     end.
 
+send_vote_creation_to_room(ParsedJson, EventName, EventID) ->
+
+    ChatRoomID      = maps:get(chatroom_id, ParsedJson),
+    Room            = find_chatroom(ChatRoomID),
+    Users           = maps:get(users, Room),
+
+    F = fun(UserPhoneNumber) ->
+        FoundUser = find_user(UserPhoneNumber),
+        Socket = maps:get(active_socket, FoundUser),
+        messaging:send_message(Socket, UserPhoneNumber, jsx:encode(#{
+            <<"chatroom_id">>       => ChatRoomID, 
+            <<"event_name">>        => EventName,
+            <<"event_id">>          => EventID,
+            <<"type">>              => <<"EVENT_CREATED">>
+            }))
+    end,
+
+    lists:foreach(F, Users).
+
 send_vote_message_to_room(ParsedJson, EventID, Type) ->
 
     FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
     ChatRoomID      = maps:get(chatroom_id, ParsedJson),
     Room            = find_chatroom(ChatRoomID),
     Users           = maps:get(users, Room),
+    Event           = find_event(EventID),
 
     F = fun(UserPhoneNumber) ->
         FoundUser = find_user(UserPhoneNumber),
@@ -704,7 +725,8 @@ send_vote_message_to_room(ParsedJson, EventID, Type) ->
             <<"chatroom_id">>       => ChatRoomID, 
             <<"vote_timestamp">>    => timestamp_now(),
             <<"event_id">>          => EventID,
-            <<"type">>              => Type
+            <<"type">>              => Type,
+            <<"votes">>             => maps:get(votes, Event)
             }))
     end,
 
@@ -1303,6 +1325,17 @@ find_events(ChatRoomID) ->
                     #{event_id => EventID, chatroom_id => ChatRoomID, event_name => EventName, votes => Votes}
                 end,
                 lists:map(F, Events)
+        end
+    end,
+    mnesia:activity(transaction, F).
+
+find_event(EventID) ->
+
+    F = fun() ->
+        case mnesia:read({aurora_events, EventID}) of
+            [#aurora_events{event_name = EventName, event_datetime = EventDateTime, votes = Votes}] ->
+                #{event_name => EventName, event_datetime => EventDateTime, votes => Votes};
+            _ -> no_such_event
         end
     end,
     mnesia:activity(transaction, F).
