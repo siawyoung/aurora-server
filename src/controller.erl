@@ -678,7 +678,7 @@ room_check(ParsedJson, FromSocket, Type) ->
     Room = find_chatroom(ChatRoomID),
     case Room of
         no_such_room ->
-            messaging:send_status_queue(FromSocket, FromPhoneNumber, 5, <<"GET_NOTES">>, <<"No such room">>),
+            messaging:send_status_queue(FromSocket, FromPhoneNumber, 5, Type, <<"No such room">>),
             false;
         FoundRoom ->
             case check_if_user_in_room(FoundRoom, FromPhoneNumber) of
@@ -1317,13 +1317,13 @@ create_event(ParsedJson) ->
 
 find_events(ChatRoomID) ->
     F = fun() ->
-        case mnesia:match_object({aurora_events, '_', ChatRoomID, '_', '_'}) of
+        case mnesia:match_object({aurora_events, '_', ChatRoomID, '_', '_', '_'}) of
             [] ->
                 no_events;
             Events ->
                 F = fun(Event) ->
-                    {aurora_events, EventID, ChatRoomID, EventName, Votes} = Event,
-                    #{event_id => EventID, chatroom_id => ChatRoomID, event_name => EventName, votes => Votes}
+                    {aurora_events, EventID, ChatRoomID, EventName, EventDateTime, Votes} = Event,
+                    #{event_id => EventID, chatroom_id => ChatRoomID, event_name => EventName, event_datetime => EventDateTime, votes => Votes}
                 end,
                 lists:map(F, Events)
         end
