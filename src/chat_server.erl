@@ -4,7 +4,7 @@
 -export([install/1]).
 
 -record(aurora_users, {phone_number, username, session_token, rooms, current_ip, active_socket}).
--record(aurora_chatrooms, {chatroom_id, chatroom_name, room_users, admin_user, expiry, group}).
+-record(aurora_chatrooms, {chatroom_id, chatroom_name, users, admin_user, expiry, group}).
 -record(aurora_message_backlog, {phone_number, messages}).
 -record(aurora_chat_messages, {chat_message_id, chatroom_id, from_phone_number, timestamp, message, tags}).
 -record(aurora_events, {event_id, chatroom_id, event_name, event_datetime, votes}).

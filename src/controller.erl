@@ -9,7 +9,7 @@
 
 % here we define the fields for each Mnesia table
 -record(aurora_users, {phone_number, username, session_token, rooms, current_ip, active_socket}).
--record(aurora_chatrooms, {chatroom_id, chatroom_name, room_users, admin_user, expiry, group}).
+-record(aurora_chatrooms, {chatroom_id, chatroom_name, users, admin_user, expiry, group}).
 -record(aurora_message_backlog, {phone_number, messages}).
 -record(aurora_chat_messages, {chat_message_id, chatroom_id, from_phone_number, timestamp, message, tags}).
 -record(aurora_events, {event_id, chatroom_id, event_name, event_datetime, votes}).
@@ -104,7 +104,7 @@ handle_cast({send_chat_message, ParsedJson, FromSocket}, State) ->
 
         _ ->
     
-            UserNumbersFound = maps:get(room_users, RoomInfo),
+            UserNumbersFound = maps:get(users, RoomInfo),
 
             case lists:member(FromPhoneNumber, UserNumbersFound) of
 
@@ -244,7 +244,7 @@ handle_cast({create_single_chatroom, ParsedJson, FromSocket}, State) ->
             messaging:send_message(FromSocket, FromPhoneNumber,
                 jsx:encode(#{
                     <<"chatroom_id">> => maps:get(chatroom_id, FoundRoom),
-                    <<"users">>       => maps:get(room_users, FoundRoom),
+                    <<"users">>       => maps:get(users, FoundRoom),
                     <<"expiry">>      => maps:get(expiry, FoundRoom),
                     <<"group">>       => false,
                     <<"type">>        => <<"SINGLE_ROOM_INVITATION">>
@@ -374,7 +374,7 @@ handle_cast({leave_room, ParsedJson, FromSocket}, State) ->
 
                 % if the user is the only person left in the room
                 % leave the room and delete
-                case length(maps:get(room_users, Room)) == 1 of
+                case length(maps:get(users, Room)) == 1 of
 
                     true ->
 
@@ -694,7 +694,7 @@ send_vote_message_to_room(ParsedJson, EventID, Type) ->
     FromPhoneNumber = maps:get(from_phone_number, ParsedJson),
     ChatRoomID      = maps:get(chatroom_id, ParsedJson),
     Room            = find_chatroom(ChatRoomID),
-    Users           = maps:get(room_users, Room),
+    Users           = maps:get(users, Room),
 
     F = fun(UserPhoneNumber) ->
         FoundUser = find_user(UserPhoneNumber),
@@ -771,7 +771,7 @@ send_chatroom_invitation(ChatRoomID, ChatRoomName, Users, Socket, PhoneNumber, E
 
 check_if_user_in_room(Room, PhoneNumber) ->
     User = find_user(PhoneNumber),
-    not(maps:get(rooms, User) == undefined) andalso lists:member(maps:get(chatroom_id, Room), maps:get(rooms, User)) and lists:member(PhoneNumber, maps:get(room_users, Room)).
+    not(maps:get(rooms, User) == undefined) andalso lists:member(maps:get(chatroom_id, Room), maps:get(rooms, User)) and lists:member(PhoneNumber, maps:get(users, Room)).
     
 add_room_to_user(ChatRoomID, PhoneNumber) ->
     User = find_user(PhoneNumber),
@@ -792,11 +792,11 @@ remove_room_from_user(ChatRoomID, PhoneNumber) ->
     update_user(rooms, PhoneNumber, UpdatedRooms).
 
 add_user_to_room(Room, PhoneNumber) ->
-    AppendedUsers = lists:append(maps:get(room_users, Room), [PhoneNumber]),
+    AppendedUsers = lists:append(maps:get(users, Room), [PhoneNumber]),
     update_chatroom(change_room_users, maps:get(chatroom_id, Room), AppendedUsers).
 
 remove_user_from_room(Room, PhoneNumber) ->
-    UpdatedUsers = lists:delete(PhoneNumber, maps:get(room_users, Room)),
+    UpdatedUsers = lists:delete(PhoneNumber, maps:get(users, Room)),
     update_chatroom(change_room_users, maps:get(chatroom_id, Room), UpdatedUsers).
 
 validate_users(Users) ->
@@ -1039,7 +1039,7 @@ create_chatroom(ParsedJson) ->
                                                 chatroom_name = ChatRoomName,
                                                 group         = Group,
                                                 expiry        = Expiry,
-                                                users    = Users}),
+                                                users         = Users}),
         case Status of
             ok -> {ok, room_created, ChatRoomID, ChatRoomName, Users, Expiry};
             _  -> error
@@ -1063,14 +1063,14 @@ find_chatroom(find_single_chatroom, PhoneNumber1, PhoneNumber2) ->
 
                     [#aurora_chatrooms{chatroom_id = ChatRoomID,
                                chatroom_name = ChatRoomName,
-                               room_users    = RoomUsers,
+                               users         = RoomUsers,
                                expiry        = Expiry,
                                group         = Group,
                                admin_user    = AdminUser}] -> 
 
                         #{chatroom_id   => ChatRoomID,
                           chatroom_name => ChatRoomName,
-                          room_users    => RoomUsers,
+                          users         => RoomUsers,
                           expiry        => list_to_binary(integer_to_list(Expiry)),
                           group         => Group,
                           admin_user    => AdminUser}
@@ -1078,14 +1078,14 @@ find_chatroom(find_single_chatroom, PhoneNumber1, PhoneNumber2) ->
 
             [#aurora_chatrooms{chatroom_id = ChatRoomID,
                                chatroom_name = ChatRoomName,
-                               room_users    = RoomUsers,
+                               users         = RoomUsers,
                                expiry        = Expiry,
                                group         = Group,
                                admin_user    = AdminUser}] -> 
 
                 #{chatroom_id   => ChatRoomID,
                   chatroom_name => ChatRoomName,
-                  room_users    => RoomUsers,
+                  users         => RoomUsers,
                   expiry        => list_to_binary(integer_to_list(Expiry)),
                   group         => Group,
                   admin_user    => AdminUser};
@@ -1105,14 +1105,14 @@ find_chatroom(ChatRoomID) ->
     F = fun() ->
         case mnesia:read({aurora_chatrooms, ChatRoomID}) of
             [#aurora_chatrooms{chatroom_name = ChatRoomName,
-                               room_users    = RoomUsers,
+                               users         = RoomUsers,
                                expiry        = Expiry,
                                group         = Group,
                                admin_user    = AdminUser}] ->
 
                 #{chatroom_id   => ChatRoomID,
                   chatroom_name => ChatRoomName,
-                  room_users    => RoomUsers,
+                  sers          => RoomUsers,
                   expiry        => list_to_binary(integer_to_list(Expiry)),
                   group         => Group,
                   admin_user    => AdminUser};
@@ -1126,7 +1126,7 @@ find_chatroom(ChatRoomID) ->
 update_chatroom(change_room_users, ChatRoomID, Users) ->
     F = fun() ->
         [ExistingRoom] = mnesia:wread({aurora_chatrooms, ChatRoomID}),
-        UpdatedRoom = ExistingRoom#aurora_chatrooms{room_users = Users},
+        UpdatedRoom = ExistingRoom#aurora_chatrooms{users = Users},
         mnesia:write(UpdatedRoom)
     end,
     mnesia:activity(transaction, F);
@@ -1347,32 +1347,6 @@ unvote_event(ParsedJson) ->
 %%%%%%%%%%%%%%%%%%%%%%%%
 %%% Auxilliary functions
 %%%%%%%%%%%%%%%%%%%%%%%%
-
-% [{['_', '$1', '_'],
-%   [{ '>', '$1', 3}],
-%   []}]
-
-
-%   ets:select(food, ets:fun2ms(fun(N = #food{calories=C}) when C < 600 -> N end)).
-% [#food{name = cereals,calories = 178,price = 2.79,group = bread},
-% #food{name = milk,calories = 150,price = 3.23,group = dairy},
-
-% -record(aurora_chatrooms, {chatroom_id, chatroom_name, room_users, admin_user, expiry, group}).
-
-
-% debts(Name) ->
-%     Match = ets:fun2ms(
-%             fun(#mafiapp_services{from=From, to=To}) when From =:= Name ->
-%                 {To,-1};
-%                 (#mafiapp_services{from=From, to=To}) when To =:= Name ->
-%                 {From,1}
-%             end),
-%     F = fun() -> mnesia:select(mafiapp_services, Match) end,
-%     Dict = lists:foldl(fun({Person,N}, Dict) ->
-%                         dict:update(Person, fun(X) -> X + N end, N, Dict)
-%                        end,
-%                        dict:new(),
-%                        mnesia:activity(transaction, F)),
 
 check_if_chatroom_expired(Room) ->
 
