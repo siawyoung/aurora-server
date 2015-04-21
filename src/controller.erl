@@ -1,6 +1,6 @@
 -module(controller).
 -behaviour(gen_server).
-
+-include_lib("stdlib/include/ms_transform.hrl").
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 -export([start/0]).
 
@@ -110,21 +110,31 @@ handle_cast({send_chat_message, ParsedJson, FromSocket}, State) ->
 
                 true ->
 
-                    % write the message to the database
-                    % note that this chat message is not the same as the message backlog queue system
-                    case create_chat_message(ParsedJson) of
+                    case check_if_chatroom_expired(RoomInfo) of
 
-                        {ok, chat_message_created, ChatMessageID} ->
+                        false ->
 
-                            F = fun(UserNumber) ->
-                                User = find_user(UserNumber),
-                                send_chat_message(User, ParsedJson, ChatMessageID, FromSocket)
-                            end,
+                            % write the message to the database
+                            % note that this chat message is not the same as the message backlog queue system
+                            case create_chat_message(ParsedJson) of
 
-                            lists:foreach(F, UserNumbersFound);
+                                {ok, chat_message_created, ChatMessageID} ->
 
-                        chat_message_error ->
-                            error
+                                    F = fun(UserNumber) ->
+                                        User = find_user(UserNumber),
+                                        send_chat_message(User, ParsedJson, ChatMessageID, FromSocket)
+                                    end,
+
+                                    lists:foreach(F, UserNumbersFound);
+
+                                chat_message_error ->
+                                    error
+
+                            end;
+
+                        true ->
+
+                            messaging:send_status_queue(FromSocket, FromPhoneNumber, 5, <<"TEXT">>, <<"The chatroom has expired.">>)
 
                     end;
 
@@ -449,15 +459,17 @@ handle_cast({get_rooms, ParsedJson, FromSocket}, State) ->
 
         _ ->
 
+            remove_expired_chatrooms(),
+
             F = fun(ChatRoomID) ->
                 find_chatroom(ChatRoomID)
             end,
 
             RoomsInfo = lists:map(F, Rooms),
-
+            FilteredRooms = lists:filter(fun(X) -> X =/= no_such_room end, RoomsInfo),
             messaging:send_message(FromSocket, FromPhoneNumber,
                 jsx:encode(#{
-                    <<"chatrooms">> => RoomsInfo,
+                    <<"chatrooms">> => FilteredRooms,
                     <<"type">> => <<"GET_ROOMS">>
             }))
 
@@ -891,7 +903,7 @@ check_if_user_admin(PhoneNumber, ChatRoomID) ->
 %%%%%%%%%%%%%%%%%%%%%%
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-% These API is kept private for a number of reasons
+% This API is kept private for a number of reasons
 % Easier to debug database errors
 % and for security reasons as well
 % we can't allow any old function to modify the
@@ -1018,7 +1030,7 @@ create_chatroom(ParsedJson) ->
     ChatRoomName = maps:get(chatroom_name, ParsedJson, null),
     Users        = maps:get(users, ParsedJson),
     Group        = maps:get(group, ParsedJson, true),
-    Expiry       = maps:get(expiry, ParsedJson),
+    Expiry       = binary_to_number(maps:get(expiry, ParsedJson)),
 
     ChatRoomID   = timestamp_now(),
 
@@ -1060,7 +1072,7 @@ find_chatroom(find_single_chatroom, PhoneNumber1, PhoneNumber2) ->
                         #{chatroom_id   => ChatRoomID,
                           chatroom_name => ChatRoomName,
                           room_users    => RoomUsers,
-                          expiry        => Expiry,
+                          expiry        => list_to_binary(integer_to_list(Expiry)),
                           group         => Group,
                           admin_user    => AdminUser}
                     end;
@@ -1075,7 +1087,7 @@ find_chatroom(find_single_chatroom, PhoneNumber1, PhoneNumber2) ->
                 #{chatroom_id   => ChatRoomID,
                   chatroom_name => ChatRoomName,
                   room_users    => RoomUsers,
-                  expiry        => Expiry,
+                  expiry        => list_to_binary(integer_to_list(Expiry)),
                   group         => Group,
                   admin_user    => AdminUser};
 
@@ -1102,7 +1114,7 @@ find_chatroom(ChatRoomID) ->
                 #{chatroom_id   => ChatRoomID,
                   chatroom_name => ChatRoomName,
                   room_users    => RoomUsers,
-                  expiry        => Expiry,
+                  expiry        => list_to_binary(integer_to_list(Expiry)),
                   group         => Group,
                   admin_user    => AdminUser};
 
@@ -1337,11 +1349,77 @@ unvote_event(ParsedJson) ->
 %%% Auxilliary functions
 %%%%%%%%%%%%%%%%%%%%%%%%
 
+% [{['_', '$1', '_'],
+%   [{ '>', '$1', 3}],
+%   []}]
+
+
+%   ets:select(food, ets:fun2ms(fun(N = #food{calories=C}) when C < 600 -> N end)).
+% [#food{name = cereals,calories = 178,price = 2.79,group = bread},
+% #food{name = milk,calories = 150,price = 3.23,group = dairy},
+
+% -record(aurora_chatrooms, {chatroom_id, chatroom_name, room_users, admin_user, expiry, group}).
+
+
+% debts(Name) ->
+%     Match = ets:fun2ms(
+%             fun(#mafiapp_services{from=From, to=To}) when From =:= Name ->
+%                 {To,-1};
+%                 (#mafiapp_services{from=From, to=To}) when To =:= Name ->
+%                 {From,1}
+%             end),
+%     F = fun() -> mnesia:select(mafiapp_services, Match) end,
+%     Dict = lists:foldl(fun({Person,N}, Dict) ->
+%                         dict:update(Person, fun(X) -> X + N end, N, Dict)
+%                        end,
+%                        dict:new(),
+%                        mnesia:activity(transaction, F)),
+
+check_if_chatroom_expired(Room) ->
+
+    TimeNow = timestamp(now()) / 1000,
+    io:format("The time now is:~p~n", [TimeNow]),
+
+    Expiry = binary_to_number(maps:get(expiry, Room)),
+    io:format("This chat room's expiry is:~p~n", [Expiry]),    
+    Expiry =< TimeNow.
+
+remove_expired_chatrooms() ->
+    
+    TimeNow = timestamp(now()) / 1000,
+    io:format("The time now is:~p~n", [TimeNow]),
+    Match = ets:fun2ms(fun(N = #aurora_chatrooms{expiry = E}) when E =< TimeNow -> N end),
+    io:format("These chatrooms are marked for deletion:~n~p~n", [Match]),
+
+
+%   [{{aurora_chatrooms,'_','_','_','_','$1','_'},
+%   [{'=<','$1',{const,1429625157968.668}}],
+%   ['$_']}]
+
+    F = fun() ->
+
+        List = mnesia:select(aurora_chatrooms, Match),
+        io:format("~p~n", [List]),
+        lists:foreach(fun(X) -> mnesia:delete_object(X) end, List)
+
+    end,
+    mnesia:activity(transaction, F).
+
 timestamp_now() ->
     list_to_binary(integer_to_list(timestamp(now()))).
 
 timestamp({Mega, Secs, Micro}) ->
     Mega*1000*1000*1000*1000 + Secs*1000*1000 + Micro.
+
+binary_to_number(B) ->
+    list_to_number(binary_to_list(B)).
+
+list_to_number(L) ->
+    try list_to_float(L)
+    catch
+        error:badarg ->
+            list_to_integer(L)
+    end.
 
 % Definitions to avoid gen_server compile warnings
 handle_info(_Message, State) -> {noreply, State}.
