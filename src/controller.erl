@@ -1112,7 +1112,7 @@ find_chatroom(ChatRoomID) ->
 
                 #{chatroom_id   => ChatRoomID,
                   chatroom_name => ChatRoomName,
-                  sers          => RoomUsers,
+                  users         => RoomUsers,
                   expiry        => list_to_binary(integer_to_list(Expiry)),
                   group         => Group,
                   admin_user    => AdminUser};
@@ -1363,11 +1363,6 @@ remove_expired_chatrooms() ->
     io:format("The time now is:~p~n", [TimeNow]),
     Match = ets:fun2ms(fun(N = #aurora_chatrooms{expiry = E}) when (E =/= 0 andalso E =< TimeNow) -> N end),
     io:format("These chatrooms are marked for deletion:~n~p~n", [Match]),
-
-
-%   [{{aurora_chatrooms,'_','_','_','_','$1','_'},
-%   [{'=<','$1',{const,1429625157968.668}}],
-%   ['$_']}]
 
     F = fun() ->
 
