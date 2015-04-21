@@ -308,8 +308,7 @@ handle_cast({room_invitation, ParsedJson, FromSocket}, State) ->
 
                 false ->
 
-                    % and of course, we can't invite if the chat room is not a group chat room
-
+                    % and of course, we can't invite users if the chatroom is a single chatroom
                     case maps:get(group, Room) of
 
                         true ->
@@ -357,11 +356,15 @@ handle_cast({leave_room, ParsedJson, FromSocket}, State) ->
             case check_if_user_admin(FromPhoneNumber, ChatRoomID) of
 
             user_not_admin ->
+
                 remove_room_from_user(ChatRoomID, FromPhoneNumber),
                 remove_user_from_room(Room, FromPhoneNumber),
                 messaging:send_status_queue(FromSocket, FromPhoneNumber, 1, <<"LEAVE_ROOM">>, #{<<"chatroom_id">> => ChatRoomID});
+
             user_is_admin -> 
 
+                % if the user is the only person left in the room
+                % leave the room and delete
                 case length(maps:get(room_users, Room)) == 1 of
 
                     true ->
@@ -396,7 +399,7 @@ handle_cast({transfer_admin, ParsedJson, FromSocket}, State) ->
         FoundRoom == no_such_room ->
             messaging:send_status_queue(FromSocket, FromPhoneNumber, 5, <<"TRANSFER_ADMIN">>, <<"No such room">>);
 
-        % notice the "true" idiom used here - this is the "else" of Erlang
+        % notice the "true" branch used here - this is the "else" of Erlang
         % meaning that this branch will always be evaluated
         true ->
             case check_if_user_in_room(FoundRoom, FromPhoneNumber) and check_if_user_in_room(FoundRoom, ToPhoneNumber) of
