@@ -652,6 +652,7 @@ handle_cast({unvote_event, ParsedJson, FromSocket}, State) ->
             case unvote_event(ParsedJson) of
 
                 vote_not_cast_yet ->
+                    send_vote_message_to_room(ParsedJson, EventID, <<"EVENT_UNVOTE_RECEIVED">>),
                     messaging:send_status_queue(FromSocket, FromPhoneNumber, 9, <<"EVENT_UNVOTE">>, #{<<"chatroom_id">> => EventID});
                 ok ->
                     send_vote_message_to_room(ParsedJson, EventID, <<"EVENT_UNVOTE_RECEIVED">>),
